@@ -12,44 +12,70 @@ admin.initializeApp({
 
 const db = admin.database();
 const messagesRef = db.ref('messages');
+const usersRef = db.ref('users');
 
-// Secret key from environment variable
-const SECRET_KEY = process.env.SECRET_KEY || 'your-very-secret-key-here';
-
-// Middleware to parse query strings
 app.use(express.urlencoded({ extended: true }));
 
-app.get('/', (req, res) => {
-    // Check User-Agent for VRChat
+const XOR_KEY = 0x5A;
+const SHIFT_VALUE = 42;
+
+function hexDecode(hexString) {
+    if (!hexString || hexString.length % 2 !== 0) return '';
+    let result = '';
+    for (let i = 0; i < hexString.length; i += 2) {
+        const hexPair = hexString.substr(i, 2);
+        result += String.fromCharCode(parseInt(hexPair, 16));
+    }
+    return result;
+}
+
+function deobfuscate(obfuscatedHex) {
+    let result = '';
+    for (let i = 0; i < obfuscatedHex.length; i += 2) {
+        const hexPair = obfuscatedHex.substr(i, 2);
+        let value = parseInt(hexPair, 16);
+        let unshifted = (value - SHIFT_VALUE + 256) % 256; // Reverse shift
+        let unxored = unshifted ^ XOR_KEY; // Reverse XOR
+        result += unxored.toString(16).padStart(2, '0'); // Back to hex
+    }
+    return result;
+}
+
+// Login endpoint
+app.get('/', async (req, res) => {
     const userAgent = req.headers['user-agent'] || '';
     if (!userAgent.includes('VRCUnity')) {
         return res.status(403).json({ error: "Access restricted to VRChat" });
     }
 
-    // Check static secret
-    const secret = req.query.secret;
-    if (secret !== SECRET_KEY) {
-        return res.status(403).json({ error: "Invalid or missing secret" });
-    }
+    const obfuscatedUsername = req.query.n || '';
+    const obfuscatedPassword = req.query.p || '';
+    const encodedUsername = deobfuscate(obfuscatedUsername);
+    const encodedPassword = deobfuscate(obfuscatedPassword);
+    const username = hexDecode(encodedUsername);
+    const password = hexDecode(encodedPassword);
+    const msg = req.query.m;
 
-    const user = req.query.user || 'Anonymous';
-    const msg = req.query.msg;
+    try {
+        const userSnapshot = await usersRef.child(username).once('value');
+        const userData = userSnapshot.val();
 
-    if (msg) {
-        const newMessageRef = messagesRef.push();
-        const timestamp = new Date().toISOString();
-        newMessageRef.set({
-            user: user,
-            msg: msg,
-            timestamp: timestamp
-        }).catch(err => {
-            console.error("Error saving message:", err);
-            return res.status(500).json({ error: "Failed to save message" });
-        });
-    }
+        if (!userData || userData.password !== password) {
+            return res.status(403).json({ error: "Invalid username or password" });
+        }
 
-    messagesRef.once('value', (snapshot) => {
-        const data = snapshot.val();
+        if (msg) {
+            const newMessageRef = messagesRef.push();
+            const timestamp = new Date().toISOString();
+            await newMessageRef.set({
+                user: username,
+                msg: msg,
+                timestamp: timestamp
+            });
+        }
+
+        const messagesSnapshot = await messagesRef.once('value');
+        const data = messagesSnapshot.val();
         if (!data) {
             return res.json([]);
         }
@@ -61,10 +87,45 @@ app.get('/', (req, res) => {
         }));
 
         res.json(chatLog);
-    }).catch(err => {
-        console.error("Error fetching messages:", err);
-        res.status(500).json({ error: "Failed to retrieve chat log" });
-    });
+    } catch (err) {
+        console.error("Error:", err);
+        res.status(500).json({ error: "Server error" });
+    }
+});
+
+// Register endpoint
+app.get('/register', async (req, res) => {
+    const userAgent = req.headers['user-agent'] || '';
+    if (!userAgent.includes('VRCUnity')) {
+        return res.status(403).json({ error: "Access restricted to VRChat" });
+    }
+
+    const obfuscatedUsername = req.query.n || '';
+    const obfuscatedPassword = req.query.p || '';
+    const encodedUsername = deobfuscate(obfuscatedUsername);
+    const encodedPassword = deobfuscate(obfuscatedPassword);
+    const username = hexDecode(encodedUsername);
+    const password = hexDecode(encodedPassword);
+
+    if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+    }
+
+    try {
+        const userSnapshot = await usersRef.child(username).once('value');
+        if (userSnapshot.exists()) {
+            return res.status(409).json({ error: "Username already taken" });
+        }
+
+        await usersRef.child(username).set({
+            password: password
+        });
+
+        res.json({ success: "User registered successfully" });
+    } catch (err) {
+        console.error("Error during registration:", err);
+        res.status(500).json({ error: "Server error" });
+    }
 });
 
 app.listen(port, () => {
