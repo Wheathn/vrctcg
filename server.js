@@ -3,22 +3,35 @@ const admin = require('firebase-admin');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Initialize Firebase Admin SDK from environment variable
+// Initialize Firebase Admin SDK
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL: 'https://vrctcg-default-rtdb.firebaseio.com/'
 });
 
-// Get a reference to the database
 const db = admin.database();
 const messagesRef = db.ref('messages');
+
+// Secret key from environment variable
+const SECRET_KEY = process.env.SECRET_KEY || 'your-very-secret-key-here';
 
 // Middleware to parse query strings
 app.use(express.urlencoded({ extended: true }));
 
-// Handle GET request to add message and return chat log in JSON
 app.get('/', (req, res) => {
+    // Check User-Agent for VRChat
+    const userAgent = req.headers['user-agent'] || '';
+    if (!userAgent.includes('VRCUnity')) {
+        return res.status(403).json({ error: "Access restricted to VRChat" });
+    }
+
+    // Check static secret
+    const secret = req.query.secret;
+    if (secret !== SECRET_KEY) {
+        return res.status(403).json({ error: "Invalid or missing secret" });
+    }
+
     const user = req.query.user || 'Anonymous';
     const msg = req.query.msg;
 
@@ -54,7 +67,6 @@ app.get('/', (req, res) => {
     });
 });
 
-// Start server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
