@@ -95,10 +95,9 @@ app.get('/', async (req, res) => {
 });
 
 // Register endpoint
-app.get('/', async (req, res) => {
+app.get('/register', async (req, res) => {
     const userAgent = req.headers['user-agent'] || '';
-    console.log("User-Agent:", userAgent);
-    if (!userAgent.includes('VRCUnity') && !userAgent.includes('Unity')) { // Broaden to catch VRChat
+    if (!userAgent.includes('Unity')) {
         return res.status(403).json({ error: "Access restricted to VRChat" });
     }
 
