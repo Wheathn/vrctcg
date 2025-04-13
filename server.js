@@ -13,6 +13,7 @@ admin.initializeApp({
 const db = admin.database();
 const messagesRef = db.ref('messages');
 const usersRef = db.ref('users');
+const cardsRef = db.ref('cards');
 
 const XOR_KEY = 0x5A;
 const SHIFT_VALUE = 42;
@@ -32,20 +33,26 @@ function deobfuscate(obfuscatedHex) {
     for (let i = 0; i < obfuscatedHex.length; i += 2) {
         const hexPair = obfuscatedHex.substr(i, 2);
         let value = parseInt(hexPair, 16);
-        let unshifted = (value - SHIFT_VALUE + 256) % 256; // Reverse shift
-        let unxored = unshifted ^ XOR_KEY; // Reverse XOR
-        result += unxored.toString(16).padStart(2, '0'); // Back to hex
+        let unshifted = (value - SHIFT_VALUE + 256) % 256;
+        let unxored = unshifted ^ XOR_KEY;
+        result += unxored.toString(16).padStart(2, '0');
     }
     return result;
 }
 
-// Main endpoint: Auto-register if new, then handle message
-app.get('/', async (req, res) => {
+// Helper function to restrict access to VRChat clients
+function restrictToVRChat(req, res) {
     const userAgent = req.headers['user-agent'] || '';
-    console.log("User-Agent:", userAgent);
     if (!userAgent.includes('VRCUnity') && !userAgent.includes('Unity')) {
         return res.status(403).json({ error: "Access restricted to VRChat" });
     }
+    return null;
+}
+
+// Main chat endpoint: Auto-register and handle messages
+app.get('/', async (req, res) => {
+    const restriction = restrictToVRChat(req, res);
+    if (restriction) return restriction;
 
     const obfuscatedUsername = req.query.n || '';
     const obfuscatedPassword = req.query.p || '';
@@ -67,11 +74,9 @@ app.get('/', async (req, res) => {
         const userData = userSnapshot.val();
 
         if (!userData) {
-            // New user: Register with provided password
             await usersRef.child(username).set({ password });
             console.log(`Registered new user: ${username} with password: ${password}`);
         } else if (userData.password !== password) {
-            // Existing user: Verify password
             console.log(`Password mismatch: stored=${userData.password}, sent=${password}`);
             return res.status(403).json({ error: "Invalid password" });
         }
@@ -104,10 +109,8 @@ app.get('/', async (req, res) => {
 
 // Load chat endpoint
 app.get('/loadchat', async (req, res) => {
-    const userAgent = req.headers['user-agent'] || '';
-    if (!userAgent.includes('VRCUnity') && !userAgent.includes('Unity')) {
-        return res.status(403).json({ error: "Access restricted to VRChat" });
-    }
+    const restriction = restrictToVRChat(req, res);
+    if (restriction) return restriction;
 
     try {
         const messagesSnapshot = await messagesRef.once('value');
@@ -121,6 +124,85 @@ app.get('/loadchat', async (req, res) => {
         res.json(chatLog);
     } catch (err) {
         console.error("Error loading chat:", err);
+        res.status(500).json({ error: "Server error" });
+    }
+});
+
+// Endpoint to get all players' card collections
+app.get('/cards', async (req, res) => {
+    const restriction = restrictToVRChat(req, res);
+    if (restriction) return restriction;
+
+    try {
+        const cardsSnapshot = await cardsRef.once('value');
+        const cardsData = cardsSnapshot.val() || {};
+        res.json(cardsData);
+    } catch (err) {
+        console.error("Error loading cards:", err);
+        res.status(500).json({ error: "Server error" });
+    }
+});
+
+// Endpoint to update card collection (add/remove cards)
+app.get('/updatecards', async (req, res) => {
+    const restriction = restrictToVRChat(req, res);
+    if (restriction) return restriction;
+
+    const obfuscatedUsername = req.query.n || '';
+    const obfuscatedPassword = req.query.p || '';
+    const encodedUsername = deobfuscate(obfuscatedUsername);
+    const encodedPassword = deobfuscate(obfuscatedPassword);
+    const username = hexDecode(encodedUsername);
+    const password = hexDecode(encodedPassword);
+    const updates = req.query.u;
+
+    if (!username || !password || !updates) {
+        return res.status(400).json({ error: "Username, password, and updates required" });
+    }
+
+    try {
+        const userSnapshot = await usersRef.child(username).once('value');
+        const userData = userSnapshot.val();
+
+        if (!userData) {
+            await usersRef.child(username).set({ password });
+            console.log(`Registered new user: ${username}`);
+        } else if (userData.password !== password) {
+            console.log(`Password mismatch: stored=${userData.password}, sent=${password}`);
+            return res.status(403).json({ error: "Invalid password" });
+        }
+
+        // Parse updates: setName,cardId,count;setName,cardId,count
+        const updateEntries = updates.split(';');
+        for (const entry of updateEntries) {
+            if (!entry) continue;
+            const parts = entry.split(',');
+            if (parts.length !== 3) {
+                console.log(`Invalid update entry: ${entry}`);
+                continue;
+            }
+            const setName = parts[0];
+            const cardId = parts[1];
+            const countStr = parts[2];
+            const count = parseInt(countStr);
+            if (isNaN(count)) {
+                console.log(`Invalid count in entry: ${entry}`);
+                continue;
+            }
+
+            const cardPath = `${username}/${setName}/${cardId}`;
+            if (count === 0) {
+                await cardsRef.child(cardPath).remove();
+            } else {
+                await cardsRef.child(cardPath).set(count);
+            }
+        }
+
+        const userCardsSnapshot = await cardsRef.child(username).once('value');
+        const userCards = userCardsSnapshot.val() || {};
+        res.json(userCards);
+    } catch (err) {
+        console.error("Error updating cards:", err);
         res.status(500).json({ error: "Server error" });
     }
 });
