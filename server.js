@@ -202,9 +202,13 @@ app.get('/updatecards', async (req, res) => {
             }
         }
 
+        // Fetch updated cards for the user
         const userCardsSnapshot = await cardsRef.child(username).once('value');
         const userCards = userCardsSnapshot.val() || {};
-        res.json(userCards);
+        // Wrap in {username: userCards} to match /cards format
+        const response = {};
+        response[username] = userCards;
+        res.json(response);
     } catch (err) {
         console.error("Error updating cards:", err);
         res.status(500).json({ error: "Server error" });
