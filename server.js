@@ -172,29 +172,33 @@ app.get('/updatecards', async (req, res) => {
             return res.status(403).json({ error: "Invalid password" });
         }
 
-        // Parse updates: setName,cardId,count;setName,cardId,count
+        // Parse updates: setName:cardId1,cardId2;setName:-cardId1,-cardId2
         const updateEntries = updates.split(';');
         for (const entry of updateEntries) {
             if (!entry) continue;
-            const parts = entry.split(',');
-            if (parts.length !== 3) {
+            const [setName, cardIdsStr] = entry.split(':');
+            if (!setName || !cardIdsStr) {
                 console.log(`Invalid update entry: ${entry}`);
                 continue;
             }
-            const setName = parts[0];
-            const cardId = parts[1];
-            const countStr = parts[2];
-            const count = parseInt(countStr);
-            if (isNaN(count)) {
-                console.log(`Invalid count in entry: ${entry}`);
-                continue;
-            }
-
-            const cardPath = `${username}/${setName}/${cardId}`;
-            if (count === 0) {
-                await cardsRef.child(cardPath).remove();
-            } else {
-                await cardsRef.child(cardPath).set(count);
+            const cardIds = cardIdsStr.split(',');
+            const isRemove = cardIds[0].startsWith('-');
+            for (let cardId of cardIds) {
+                if (isRemove) {
+                    cardId = cardId.substring(1); // Remove '-'
+                }
+                if (!cardId || isNaN(parseInt(cardId))) {
+                    console.log(`Invalid cardId in entry: ${entry}, cardId: ${cardId}`);
+                    continue;
+                }
+                const cardPath = `${username}/${setName}/${cardId}`;
+                if (isRemove) {
+                    await cardsRef.child(cardPath).remove();
+                    console.log(`Removed card: ${cardPath}`);
+                } else {
+                    await cardsRef.child(cardPath).set(true); // Binary: owned
+                    console.log(`Added card: ${cardPath}`);
+                }
             }
         }
 
