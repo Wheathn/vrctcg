@@ -196,7 +196,7 @@ app.get('/updatecards', async (req, res) => {
                     await cardsRef.child(cardPath).remove();
                     console.log(`Removed card: ${cardPath}`);
                 } else {
-                    await cardsRef.child(cardPath).set({}); // Empty object: card exists
+                    await cardsRef.child(cardPath).set("T"); // Minimal placeholder
                     console.log(`Added card: ${cardPath}`);
                 }
             }
