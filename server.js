@@ -196,7 +196,7 @@ app.get('/updatecards', async (req, res) => {
                     await cardsRef.child(cardPath).remove();
                     console.log(`Removed card: ${cardPath}`);
                 } else {
-                    await cardsRef.child(cardPath).set(true); // Binary: owned
+                    await cardsRef.child(cardPath).set({}); // Empty object: card exists
                     console.log(`Added card: ${cardPath}`);
                 }
             }
