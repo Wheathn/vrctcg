@@ -40,7 +40,6 @@ function deobfuscate(obfuscatedHex) {
     return result;
 }
 
-// Helper function to restrict access to VRChat clients
 function restrictToVRChat(req, res) {
     const userAgent = req.headers['user-agent'] || '';
     if (!userAgent.includes('VRCUnity') && !userAgent.includes('Unity')) {
@@ -49,7 +48,6 @@ function restrictToVRChat(req, res) {
     return null;
 }
 
-// Main chat endpoint: Auto-register and handle messages
 app.get('/', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
@@ -107,7 +105,6 @@ app.get('/', async (req, res) => {
     }
 });
 
-// Load chat endpoint
 app.get('/loadchat', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
@@ -128,14 +125,27 @@ app.get('/loadchat', async (req, res) => {
     }
 });
 
-// Endpoint to get all players' card collections and wanted lists
 app.get('/cards', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
     try {
         const cardsSnapshot = await cardsRef.once('value');
-        const cardsData = cardsSnapshot.val() || {};
+        let cardsData = cardsSnapshot.val() || {};
+
+        // Normalize sve to object for all users
+        for (const username in cardsData) {
+            if (cardsData[username].sve && Array.isArray(cardsData[username].sve)) {
+                const sveObject = {};
+                cardsData[username].sve.forEach((value, index) => {
+                    if (value === "T") {
+                        sveObject[index] = "T";
+                    }
+                });
+                cardsData[username].sve = sveObject;
+            }
+        }
+
         res.json(cardsData);
     } catch (err) {
         console.error("Error loading cards:", err);
@@ -143,7 +153,6 @@ app.get('/cards', async (req, res) => {
     }
 });
 
-// Endpoint to update card collection and wanted list
 app.get('/updatecards', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
@@ -173,7 +182,6 @@ app.get('/updatecards', async (req, res) => {
             return res.status(403).json({ error: "Invalid password" });
         }
 
-        // Process card updates
         if (updates) {
             const updateEntries = updates.split(';');
             for (const entry of updateEntries) {
@@ -205,7 +213,6 @@ app.get('/updatecards', async (req, res) => {
             }
         }
 
-        // Process wanted cards
         if (wanted) {
             const wantedCards = wanted.split(',');
             for (const card of wantedCards) {
@@ -224,7 +231,6 @@ app.get('/updatecards', async (req, res) => {
             }
         }
 
-        // Fetch updated cards and wanted list for the user
         const userCardsSnapshot = await cardsRef.child(username).once('value');
         let userCards = userCardsSnapshot.val() || {};
 
