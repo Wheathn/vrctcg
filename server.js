@@ -128,7 +128,7 @@ app.get('/loadchat', async (req, res) => {
     }
 });
 
-// Endpoint to get all players' card collections
+// Endpoint to get all players' card collections and wanted lists
 app.get('/cards', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
@@ -143,7 +143,7 @@ app.get('/cards', async (req, res) => {
     }
 });
 
-// Endpoint to update card collection (add/remove cards)
+// Endpoint to update card collection and wanted list
 app.get('/updatecards', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
@@ -155,9 +155,10 @@ app.get('/updatecards', async (req, res) => {
     const username = hexDecode(encodedUsername);
     const password = hexDecode(encodedPassword);
     const updates = req.query.u;
+    const wanted = req.query.w;
 
-    if (!username || !password || !updates) {
-        return res.status(400).json({ error: "Username, password, and updates required" });
+    if (!username || !password) {
+        return res.status(400).json({ error: "Username and password required" });
     }
 
     try {
@@ -172,35 +173,58 @@ app.get('/updatecards', async (req, res) => {
             return res.status(403).json({ error: "Invalid password" });
         }
 
-        const updateEntries = updates.split(';');
-        for (const entry of updateEntries) {
-            if (!entry) continue;
-            const [setName, cardIdsStr] = entry.split(':');
-            if (!setName || !cardIdsStr) {
-                console.log(`Invalid update entry: ${entry}`);
-                continue;
-            }
-            const cardIds = cardIdsStr.split(',');
-            const isRemove = cardIds[0].startsWith('-');
-            for (let cardId of cardIds) {
-                if (isRemove) {
-                    cardId = cardId.substring(1);
-                }
-                if (!cardId || isNaN(parseInt(cardId))) {
-                    console.log(`Invalid cardId in entry: ${entry}, cardId: ${cardId}`);
+        // Process card updates
+        if (updates) {
+            const updateEntries = updates.split(';');
+            for (const entry of updateEntries) {
+                if (!entry) continue;
+                const [setName, cardIdsStr] = entry.split(':');
+                if (!setName || !cardIdsStr) {
+                    console.log(`Invalid update entry: ${entry}`);
                     continue;
                 }
-                const cardPath = `${username}/${setName}/${cardId}`;
-                if (isRemove) {
-                    await cardsRef.child(cardPath).remove();
-                    console.log(`Removed card: ${cardPath}`);
-                } else {
-                    await cardsRef.child(cardPath).set("T");
-                    console.log(`Added card: ${cardPath}`);
+                const cardIds = cardIdsStr.split(',');
+                const isRemove = cardIds[0].startsWith('-');
+                for (let cardId of cardIds) {
+                    if (isRemove) {
+                        cardId = cardId.substring(1);
+                    }
+                    if (!cardId || isNaN(parseInt(cardId))) {
+                        console.log(`Invalid cardId in entry: ${entry}, cardId: ${cardId}`);
+                        continue;
+                    }
+                    const cardPath = `${username}/${setName}/${cardId}`;
+                    if (isRemove) {
+                        await cardsRef.child(cardPath).remove();
+                        console.log(`Removed card: ${cardPath}`);
+                    } else {
+                        await cardsRef.child(cardPath).set("T");
+                        console.log(`Added card: ${cardPath}`);
+                    }
                 }
             }
         }
 
+        // Process wanted cards
+        if (wanted) {
+            const wantedCards = wanted.split(',');
+            for (const card of wantedCards) {
+                if (!card.includes(':')) {
+                    console.log(`Invalid wanted card format: ${card}`);
+                    continue;
+                }
+                const [setName, cardId] = card.split(':');
+                if (!setName || !cardId || isNaN(parseInt(cardId))) {
+                    console.log(`Invalid wanted card: ${card}`);
+                    continue;
+                }
+                const wantedPath = `${username}/wanted/${setName}:${cardId}`;
+                await cardsRef.child(wantedPath).set(true);
+                console.log(`Added wanted card: ${wantedPath}`);
+            }
+        }
+
+        // Fetch updated cards and wanted list for the user
         const userCardsSnapshot = await cardsRef.child(username).once('value');
         let userCards = userCardsSnapshot.val() || {};
 
@@ -213,7 +237,6 @@ app.get('/updatecards', async (req, res) => {
                 }
             });
             userCards.sve = sveObject;
-            // Update Firebase to store sve as object
             await cardsRef.child(`${username}/sve`).set(sveObject);
         }
 
