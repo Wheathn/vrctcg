@@ -172,7 +172,6 @@ app.get('/updatecards', async (req, res) => {
             return res.status(403).json({ error: "Invalid password" });
         }
 
-        // Parse updates: setName:cardId1,cardId2;setName:-cardId1,-cardId2
         const updateEntries = updates.split(';');
         for (const entry of updateEntries) {
             if (!entry) continue;
@@ -185,7 +184,7 @@ app.get('/updatecards', async (req, res) => {
             const isRemove = cardIds[0].startsWith('-');
             for (let cardId of cardIds) {
                 if (isRemove) {
-                    cardId = cardId.substring(1); // Remove '-'
+                    cardId = cardId.substring(1);
                 }
                 if (!cardId || isNaN(parseInt(cardId))) {
                     console.log(`Invalid cardId in entry: ${entry}, cardId: ${cardId}`);
@@ -196,16 +195,28 @@ app.get('/updatecards', async (req, res) => {
                     await cardsRef.child(cardPath).remove();
                     console.log(`Removed card: ${cardPath}`);
                 } else {
-                    await cardsRef.child(cardPath).set("T"); // Minimal placeholder
+                    await cardsRef.child(cardPath).set("T");
                     console.log(`Added card: ${cardPath}`);
                 }
             }
         }
 
-        // Fetch updated cards for the user
         const userCardsSnapshot = await cardsRef.child(username).once('value');
-        const userCards = userCardsSnapshot.val() || {};
-        // Wrap in {username: userCards} to match /cards format
+        let userCards = userCardsSnapshot.val() || {};
+
+        // Normalize sve to object if itfs an array
+        if (userCards.sve && Array.isArray(userCards.sve)) {
+            const sveObject = {};
+            userCards.sve.forEach((value, index) => {
+                if (value === "T") {
+                    sveObject[index] = "T";
+                }
+            });
+            userCards.sve = sveObject;
+            // Update Firebase to store sve as object
+            await cardsRef.child(`${username}/sve`).set(sveObject);
+        }
+
         const response = {};
         response[username] = userCards;
         res.json(response);
