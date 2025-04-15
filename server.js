@@ -231,24 +231,26 @@ app.get('/updatecards', async (req, res) => {
             }
         }
 
-        const userCardsSnapshot = await cardsRef.child(username).once('value');
-        let userCards = userCardsSnapshot.val() || {};
+        // Fetch all players' card data
+        const cardsSnapshot = await cardsRef.once('value');
+        let cardsData = cardsSnapshot.val() || {};
 
-        // Normalize sve to object if itfs an array
-        if (userCards.sve && Array.isArray(userCards.sve)) {
-            const sveObject = {};
-            userCards.sve.forEach((value, index) => {
-                if (value === "T") {
-                    sveObject[index] = "T";
-                }
-            });
-            userCards.sve = sveObject;
-            await cardsRef.child(`${username}/sve`).set(sveObject);
+        // Normalize sve to object for all users
+        for (const user in cardsData) {
+            if (cardsData[user].sve && Array.isArray(cardsData[user].sve)) {
+                const sveObject = {};
+                cardsData[user].sve.forEach((value, index) => {
+                    if (value === "T") {
+                        sveObject[index] = "T";
+                    }
+                });
+                cardsData[user].sve = sveObject;
+                await cardsRef.child(`${user}/sve`).set(sveObject);
+            }
         }
 
-        const response = {};
-        response[username] = userCards;
-        res.json(response);
+        // Return the full dataset
+        res.json(cardsData);
     } catch (err) {
         console.error("Error updating cards:", err);
         res.status(500).json({ error: "Server error" });
