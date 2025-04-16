@@ -236,22 +236,21 @@ app.get('/updatecards', async (req, res) => {
                     console.log(`[updatecards] Invalid cardId in wanted card: ${card}`);
                     continue;
                 }
+                const wantedPath = `${username}/wanted/${setName}:${cardId}`;
                 if (isRemove) {
-                    const cardPath = `${username}/${setName}/${cardId}`;
-                    console.log(`[updatecards] Attempting to remove card from collection: ${cardPath}`);
-                    // Check if the card exists before attempting removal
-                    const cardSnapshot = await cardsRef.child(cardPath).once('value');
-                    if (cardSnapshot.exists()) {
-                        await cardsRef.child(cardPath).remove();
-                        console.log(`[updatecards] Successfully removed card from collection: ${cardPath}`);
+                    console.log(`[updatecards] Attempting to remove from wanted list: ${wantedPath}`);
+                    // Check if the card exists in the wanted list
+                    const wantedSnapshot = await cardsRef.child(wantedPath).once('value');
+                    if (wantedSnapshot.exists()) {
+                        await cardsRef.child(wantedPath).remove();
+                        console.log(`[updatecards] Successfully removed from wanted list: ${wantedPath}`);
                     } else {
-                        console.log(`[updatecards] Card not found in collection: ${cardPath}`);
+                        console.log(`[updatecards] Card not found in wanted list: ${wantedPath}`);
                     }
                 } else {
-                    const wantedPath = `${username}/wanted/${setName}:${cardId}`;
-                    console.log(`[updatecards] Adding wanted card: ${wantedPath}`);
+                    console.log(`[updatecards] Adding to wanted list: ${wantedPath}`);
                     await cardsRef.child(wantedPath).set(true);
-                    console.log(`[updatecards] Added wanted card: ${wantedPath}`);
+                    console.log(`[updatecards] Added to wanted list: ${wantedPath}`);
                 }
             }
         }
