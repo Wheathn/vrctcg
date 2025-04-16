@@ -137,6 +137,7 @@ app.get('/', async (req, res) => {
 });
 
 app.get('/loadchat', async (req, res) => {
+    console.log('Handling /loadchat');
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
@@ -146,15 +147,28 @@ app.get('/loadchat', async (req, res) => {
     }
 
     try {
-        const messagesSnapshot = await messagesRef.once('value');
-        const data = messagesSnapshot.val() || {};
-        const chatLog = Object.keys(data).map(key => ({
-            user: data[key].user,
-            msg: data[key].msg,
-            timestamp: data[key].timestamp
-        }));
+        const limit = parseInt(req.query.limit) || 100; // Default to 100
+        const startAt = req.query.startAt || null; // Timestamp to start from
 
-        res.json(chatLog);
+        let query = messagesRef.orderByChild('timestamp').limitToLast(limit);
+        if (startAt) {
+            query = query.endAt(startAt);
+        }
+
+        const messagesSnapshot = await query.once('value');
+        const data = messagesSnapshot.val() || {};
+        const chatLog = Object.keys(data)
+            .map(key => ({
+                user: data[key].user,
+                msg: data[key].msg,
+                timestamp: data[key].timestamp
+            }))
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first
+
+        res.json({
+            messages: chatLog,
+            nextStartAt: chatLog.length === limit ? chatLog[chatLog.length - 1].timestamp : null
+        });
     } catch (err) {
         console.error('Error in /loadchat:', err.message);
         res.status(500).json({ error: 'Server error' });
