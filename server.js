@@ -220,14 +220,28 @@ app.get('/updatecards', async (req, res) => {
                     console.log(`Invalid wanted card format: ${card}`);
                     continue;
                 }
-                const [setName, cardId] = card.split(':');
-                if (!setName || !cardId || isNaN(parseInt(cardId))) {
+                const [setName, cardIdStr] = card.split(':');
+                if (!setName || !cardIdStr) {
                     console.log(`Invalid wanted card: ${card}`);
                     continue;
                 }
-                const wantedPath = `${username}/wanted/${setName}:${cardId}`;
-                await cardsRef.child(wantedPath).set(true);
-                console.log(`Added wanted card: ${wantedPath}`);
+                const isRemove = cardIdStr.startsWith('-');
+                const cardId = isRemove ? cardIdStr.substring(1) : cardIdStr;
+                if (!cardId || isNaN(parseInt(cardId))) {
+                    console.log(`Invalid cardId in wanted card: ${card}`);
+                    continue;
+                }
+                if (isRemove) {
+                    // Remove the card from the user's collection
+                    const cardPath = `${username}/${setName}/${cardId}`;
+                    await cardsRef.child(cardPath).remove();
+                    console.log(`Removed card from collection: ${cardPath}`);
+                } else {
+                    // Add to wanted list
+                    const wantedPath = `${username}/wanted/${setName}:${cardId}`;
+                    await cardsRef.child(wantedPath).set(true);
+                    console.log(`Added wanted card: ${wantedPath}`);
+                }
             }
         }
 
