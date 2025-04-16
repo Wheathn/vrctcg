@@ -1,0 +1,5 @@
+git add .
+git commit -m "Fix vercel"
+git push
+
+https://github.com/Wheathn/vrctcg
