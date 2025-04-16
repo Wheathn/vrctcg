@@ -147,8 +147,8 @@ app.get('/loadchat', async (req, res) => {
     }
 
     try {
-        const limit = parseInt(req.query.limit) || 100; // Default to 100
-        const startAt = req.query.startAt || null; // Timestamp to start from
+        const limit = Math.min(parseInt(req.query.limit) || 100, 100); // Default 100, max 100
+        const startAt = req.query.startAt || null; // ISO timestamp for pagination
 
         let query = messagesRef.orderByChild('timestamp').limitToLast(limit);
         if (startAt) {
@@ -165,9 +165,13 @@ app.get('/loadchat', async (req, res) => {
             }))
             .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first
 
+        const nextStartAt = chatLog.length === limit && chatLog.length > 0
+            ? chatLog[chatLog.length - 1].timestamp
+            : null;
+
         res.json({
             messages: chatLog,
-            nextStartAt: chatLog.length === limit ? chatLog[chatLog.length - 1].timestamp : null
+            nextStartAt: nextStartAt
         });
     } catch (err) {
         console.error('Error in /loadchat:', err.message);
