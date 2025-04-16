@@ -1,18 +1,15 @@
 {
-  "name": "vrctcg_server",
+  "name": "vrctcg-server",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node api/index.js",
+    "vercel-build": "echo 'No build required'"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "express": "^5.1.0",
-    "firebase-admin": "^13.2.0",
-    "sqlite3": "^5.1.7"
+    "express": "^4.17.1",
+    "firebase-admin": "^11.0.0"
+  },
+  "engines": {
+    "node": ">=14"
   }
 }
