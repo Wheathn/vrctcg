@@ -74,43 +74,42 @@ app.get('/debug', async (req, res) => {
     }
 });
 
-app.get('/', async (req, res) => {
+app.get('/send', async (req, res) => {
+    console.log('Handling /');
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
-    if (!firebaseInitialized || !usersRef || !messagesRef) {
+    if (!firebaseInitialized || !messagesRef || !usersRef) {
         console.error('Firebase not available for /');
         return res.status(500).json({ error: 'Database unavailable' });
     }
 
     const obfuscatedUsername = req.query.n || '';
     const obfuscatedPassword = req.query.p || '';
-    const encodedUsername = deobfuscate(obfuscatedUsername);
-    const encodedPassword = deobfuscate(obfuscatedPassword);
-    const username = hexDecode(encodedUsername);
-    const password = hexDecode(encodedPassword);
     const msg = req.query.m;
 
-    console.log(`Received: n=${obfuscatedUsername}, p=${obfuscatedPassword}`);
-    console.log(`Decoded: username=${username}, password=${password}`);
-
-    if (!username || !password) {
-        return res.status(400).json({ error: 'Username and password required' });
+    let username = '';
+    let password = '';
+    if (msg) {
+        const encodedUsername = deobfuscate(obfuscatedUsername);
+        const encodedPassword = deobfuscate(obfuscatedPassword);
+        username = hexDecode(encodedUsername);
+        password = hexDecode(encodedPassword);
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password required for sending messages' });
+        }
     }
 
     try {
-        const userSnapshot = await usersRef.child(username).once('value');
-        const userData = userSnapshot.val();
-
-        if (!userData) {
-            await usersRef.child(username).set({ password });
-            console.log(`Registered new user: ${username} with password: ${password}`);
-        } else if (userData.password !== password) {
-            console.log(`Password mismatch: stored=${userData.password}, sent=${password}`);
-            return res.status(403).json({ error: 'Invalid password' });
-        }
-
         if (msg) {
+            const userSnapshot = await usersRef.child(username).once('value');
+            const userData = userSnapshot.val();
+            if (!userData) {
+                await usersRef.child(username).set({ password });
+                console.log(`Registered new user: ${username}`);
+            } else if (userData.password !== password) {
+                return res.status(403).json({ error: 'Invalid password' });
+            }
             const newMessageRef = messagesRef.push();
             const timestamp = new Date().toISOString();
             await newMessageRef.set({
@@ -121,15 +120,19 @@ app.get('/', async (req, res) => {
             console.log(`Message saved: ${username}: ${msg}`);
         }
 
-        const messagesSnapshot = await messagesRef.once('value');
+        const limit = Math.min(parseInt(req.query.limit) || 100, 100); // Match /loadchat
+        const query = messagesRef.orderByChild('timestamp').limitToLast(limit);
+        const messagesSnapshot = await query.once('value');
         const data = messagesSnapshot.val() || {};
-        const chatLog = Object.keys(data).map(key => ({
-            user: data[key].user,
-            msg: data[key].msg,
-            timestamp: data[key].timestamp
-        }));
+        const chatLog = Object.keys(data)
+            .map(key => ({
+                user: data[key].user,
+                msg: data[key].msg,
+                timestamp: data[key].timestamp
+            }))
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first
 
-        res.json(chatLog);
+        res.json({ messages: chatLog });
     } catch (err) {
         console.error('Error in /:', err.message);
         res.status(500).json({ error: 'Server error' });
