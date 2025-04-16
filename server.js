@@ -1,14 +1,19 @@
 const express = require('express');
 const admin = require('firebase-admin');
 const app = express();
-const port = process.env.PORT || 3000;
+
+app.use(express.json()); // Ensure JSON parsing for potential future POST requests
 
 // Initialize Firebase Admin SDK with environment variable
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: 'https://vrctcg-default-rtdb.firebaseio.com/'
-});
+try {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL: 'https://vrctcg-default-rtdb.firebaseio.com/'
+    });
+} catch (error) {
+    console.error('Firebase initialization error:', error.message);
+}
 
 const db = admin.database();
 const messagesRef = db.ref('messages');
@@ -43,7 +48,7 @@ function deobfuscate(obfuscatedHex) {
 function restrictToVRChat(req, res) {
     const userAgent = req.headers['user-agent'] || '';
     if (!userAgent.includes('VRCUnity') && !userAgent.includes('Unity')) {
-        return res.status(403).json({ error: "Access restricted to VRChat" });
+        return res.status(403).json({ error: 'Access restricted to VRChat' });
     }
     return null;
 }
@@ -64,7 +69,7 @@ app.get('/', async (req, res) => {
     console.log(`Decoded: username=${username}, password=${password}`);
 
     if (!username || !password) {
-        return res.status(400).json({ error: "Username and password required" });
+        return res.status(400).json({ error: 'Username and password required' });
     }
 
     try {
@@ -76,7 +81,7 @@ app.get('/', async (req, res) => {
             console.log(`Registered new user: ${username} with password: ${password}`);
         } else if (userData.password !== password) {
             console.log(`Password mismatch: stored=${userData.password}, sent=${password}`);
-            return res.status(403).json({ error: "Invalid password" });
+            return res.status(403).json({ error: 'Invalid password' });
         }
 
         if (msg) {
@@ -100,8 +105,8 @@ app.get('/', async (req, res) => {
 
         res.json(chatLog);
     } catch (err) {
-        console.error("Error:", err);
-        res.status(500).json({ error: "Server error" });
+        console.error('Error:', err);
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -120,8 +125,8 @@ app.get('/loadchat', async (req, res) => {
 
         res.json(chatLog);
     } catch (err) {
-        console.error("Error loading chat:", err);
-        res.status(500).json({ error: "Server error" });
+        console.error('Error loading chat:', err);
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -138,8 +143,8 @@ app.get('/cards', async (req, res) => {
             if (cardsData[username].sve && Array.isArray(cardsData[username].sve)) {
                 const sveObject = {};
                 cardsData[username].sve.forEach((value, index) => {
-                    if (value === "T") {
-                        sveObject[index] = "T";
+                    if (value === 'T') {
+                        sveObject[index] = 'T';
                     }
                 });
                 cardsData[username].sve = sveObject;
@@ -148,8 +153,8 @@ app.get('/cards', async (req, res) => {
 
         res.json(cardsData);
     } catch (err) {
-        console.error("Error loading cards:", err);
-        res.status(500).json({ error: "Server error" });
+        console.error('Error loading cards:', err);
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -170,7 +175,7 @@ app.get('/updatecards', async (req, res) => {
 
     if (!username || !password) {
         console.log(`[updatecards] Missing username or password: username=${username}, password=${password}`);
-        return res.status(400).json({ error: "Username and password required" });
+        return res.status(400).json({ error: 'Username and password required' });
     }
 
     try {
@@ -182,7 +187,7 @@ app.get('/updatecards', async (req, res) => {
             await usersRef.child(username).set({ password });
         } else if (userData.password !== password) {
             console.log(`[updatecards] Password mismatch for ${username}: stored=${userData.password}, sent=${password}`);
-            return res.status(403).json({ error: "Invalid password" });
+            return res.status(403).json({ error: 'Invalid password' });
         }
 
         if (updates) {
@@ -211,7 +216,7 @@ app.get('/updatecards', async (req, res) => {
                         console.log(`[updatecards] Removed card: ${cardPath}`);
                     } else {
                         console.log(`[updatecards] Adding card: ${cardPath}`);
-                        await cardsRef.child(cardPath).set("T");
+                        await cardsRef.child(cardPath).set('T');
                         console.log(`[updatecards] Added card: ${cardPath}`);
                     }
                 }
@@ -239,7 +244,6 @@ app.get('/updatecards', async (req, res) => {
                 const wantedPath = `${username}/wanted/${setName}:${cardId}`;
                 if (isRemove) {
                     console.log(`[updatecards] Attempting to remove from wanted list: ${wantedPath}`);
-                    // Check if the card exists in the wanted list
                     const wantedSnapshot = await cardsRef.child(wantedPath).once('value');
                     if (wantedSnapshot.exists()) {
                         await cardsRef.child(wantedPath).remove();
@@ -255,18 +259,16 @@ app.get('/updatecards', async (req, res) => {
             }
         }
 
-        // Fetch all players' card data
         console.log(`[updatecards] Fetching all players' card data`);
         const cardsSnapshot = await cardsRef.once('value');
         let cardsData = cardsSnapshot.val() || {};
 
-        // Normalize sve to object for all users
         for (const user in cardsData) {
             if (cardsData[user].sve && Array.isArray(cardsData[user].sve)) {
                 const sveObject = {};
                 cardsData[user].sve.forEach((value, index) => {
-                    if (value === "T") {
-                        sveObject[index] = "T";
+                    if (value === 'T') {
+                        sveObject[index] = 'T';
                     }
                 });
                 cardsData[user].sve = sveObject;
@@ -279,10 +281,9 @@ app.get('/updatecards', async (req, res) => {
         res.json(cardsData);
     } catch (err) {
         console.error(`[updatecards] Error updating cards: ${err.message}`);
-        res.status(500).json({ error: "Server error" });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
-app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-});
+// Export for Vercel serverless
+module.exports = app;
