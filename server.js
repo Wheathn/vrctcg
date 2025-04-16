@@ -166,7 +166,10 @@ app.get('/updatecards', async (req, res) => {
     const updates = req.query.u;
     const wanted = req.query.w;
 
+    console.log(`[updatecards] Received: username=${username}, updates=${updates}, wanted=${wanted}`);
+
     if (!username || !password) {
+        console.log(`[updatecards] Missing username or password: username=${username}, password=${password}`);
         return res.status(400).json({ error: "Username and password required" });
     }
 
@@ -175,10 +178,10 @@ app.get('/updatecards', async (req, res) => {
         const userData = userSnapshot.val();
 
         if (!userData) {
+            console.log(`[updatecards] Registering new user: ${username}`);
             await usersRef.child(username).set({ password });
-            console.log(`Registered new user: ${username}`);
         } else if (userData.password !== password) {
-            console.log(`Password mismatch: stored=${userData.password}, sent=${password}`);
+            console.log(`[updatecards] Password mismatch for ${username}: stored=${userData.password}, sent=${password}`);
             return res.status(403).json({ error: "Invalid password" });
         }
 
@@ -188,7 +191,7 @@ app.get('/updatecards', async (req, res) => {
                 if (!entry) continue;
                 const [setName, cardIdsStr] = entry.split(':');
                 if (!setName || !cardIdsStr) {
-                    console.log(`Invalid update entry: ${entry}`);
+                    console.log(`[updatecards] Invalid update entry: ${entry}`);
                     continue;
                 }
                 const cardIds = cardIdsStr.split(',');
@@ -198,16 +201,18 @@ app.get('/updatecards', async (req, res) => {
                         cardId = cardId.substring(1);
                     }
                     if (!cardId || isNaN(parseInt(cardId))) {
-                        console.log(`Invalid cardId in entry: ${entry}, cardId: ${cardId}`);
+                        console.log(`[updatecards] Invalid cardId in entry: ${entry}, cardId: ${cardId}`);
                         continue;
                     }
                     const cardPath = `${username}/${setName}/${cardId}`;
                     if (isRemove) {
+                        console.log(`[updatecards] Attempting to remove card: ${cardPath}`);
                         await cardsRef.child(cardPath).remove();
-                        console.log(`Removed card: ${cardPath}`);
+                        console.log(`[updatecards] Removed card: ${cardPath}`);
                     } else {
+                        console.log(`[updatecards] Adding card: ${cardPath}`);
                         await cardsRef.child(cardPath).set("T");
-                        console.log(`Added card: ${cardPath}`);
+                        console.log(`[updatecards] Added card: ${cardPath}`);
                     }
                 }
             }
@@ -217,35 +222,42 @@ app.get('/updatecards', async (req, res) => {
             const wantedCards = wanted.split(',');
             for (const card of wantedCards) {
                 if (!card.includes(':')) {
-                    console.log(`Invalid wanted card format: ${card}`);
+                    console.log(`[updatecards] Invalid wanted card format: ${card}`);
                     continue;
                 }
                 const [setName, cardIdStr] = card.split(':');
                 if (!setName || !cardIdStr) {
-                    console.log(`Invalid wanted card: ${card}`);
+                    console.log(`[updatecards] Invalid wanted card: ${card}`);
                     continue;
                 }
                 const isRemove = cardIdStr.startsWith('-');
                 const cardId = isRemove ? cardIdStr.substring(1) : cardIdStr;
                 if (!cardId || isNaN(parseInt(cardId))) {
-                    console.log(`Invalid cardId in wanted card: ${card}`);
+                    console.log(`[updatecards] Invalid cardId in wanted card: ${card}`);
                     continue;
                 }
                 if (isRemove) {
-                    // Remove the card from the user's collection
                     const cardPath = `${username}/${setName}/${cardId}`;
-                    await cardsRef.child(cardPath).remove();
-                    console.log(`Removed card from collection: ${cardPath}`);
+                    console.log(`[updatecards] Attempting to remove card from collection: ${cardPath}`);
+                    // Check if the card exists before attempting removal
+                    const cardSnapshot = await cardsRef.child(cardPath).once('value');
+                    if (cardSnapshot.exists()) {
+                        await cardsRef.child(cardPath).remove();
+                        console.log(`[updatecards] Successfully removed card from collection: ${cardPath}`);
+                    } else {
+                        console.log(`[updatecards] Card not found in collection: ${cardPath}`);
+                    }
                 } else {
-                    // Add to wanted list
                     const wantedPath = `${username}/wanted/${setName}:${cardId}`;
+                    console.log(`[updatecards] Adding wanted card: ${wantedPath}`);
                     await cardsRef.child(wantedPath).set(true);
-                    console.log(`Added wanted card: ${wantedPath}`);
+                    console.log(`[updatecards] Added wanted card: ${wantedPath}`);
                 }
             }
         }
 
         // Fetch all players' card data
+        console.log(`[updatecards] Fetching all players' card data`);
         const cardsSnapshot = await cardsRef.once('value');
         let cardsData = cardsSnapshot.val() || {};
 
@@ -260,13 +272,14 @@ app.get('/updatecards', async (req, res) => {
                 });
                 cardsData[user].sve = sveObject;
                 await cardsRef.child(`${user}/sve`).set(sveObject);
+                console.log(`[updatecards] Normalized sve for user: ${user}`);
             }
         }
 
-        // Return the full dataset
+        console.log(`[updatecards] Returning cards data for ${Object.keys(cardsData).length} users`);
         res.json(cardsData);
     } catch (err) {
-        console.error("Error updating cards:", err);
+        console.error(`[updatecards] Error updating cards: ${err.message}`);
         res.status(500).json({ error: "Server error" });
     }
 });
