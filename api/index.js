@@ -195,14 +195,23 @@ app.get('/cards', async (req, res) => {
         const cardsSnapshot = await cardsRef.once('value');
         let cardsData = cardsSnapshot.val() || {};
 
-        // Normalize data for compatibility with client
+        // Normalize data for compatibility
         for (const username in cardsData) {
             if (cardsData[username].wanted) {
                 const wanted = {};
-                for (const card in cardsData[username].wanted) {
-                    // Include card if it exists (boolean true or any value)
-                    if (cardsData[username].wanted[card] === true || cardsData[username].wanted[card] !== null) {
-                        wanted[card] = {};
+                for (const cardKey in cardsData[username].wanted) {
+                    // Handle old boolean format (e.g., set1:0: true)
+                    if (cardsData[username].wanted[cardKey] === true) {
+                        wanted[cardKey] = "0"; // Convert to string with default ID
+                    }
+                    // Handle old object format (e.g., set1:0: { "15": true })
+                    else if (typeof cardsData[username].wanted[cardKey] === 'object' && cardsData[username].wanted[cardKey] !== null) {
+                        const ids = Object.keys(cardsData[username].wanted[cardKey]).filter(id => cardsData[username].wanted[cardKey][id] === true);
+                        wanted[cardKey] = ids.join(',');
+                    }
+                    // Already a string (new format)
+                    else if (typeof cardsData[username].wanted[cardKey] === 'string') {
+                        wanted[cardKey] = cardsData[username].wanted[cardKey];
                     }
                 }
                 cardsData[username].wanted = wanted;
@@ -296,37 +305,47 @@ app.get('/updatecards', async (req, res) => {
         }
 
         if (wanted) {
-            const wantedCards = wanted.split(',');
-            for (const card of wantedCards) {
-                if (!card.includes(':')) {
-                    console.log(`[updatecards] Invalid wanted card format: ${card}`);
+            const wantedEntries = wanted.split(';');
+            for (const entry of wantedEntries) {
+                if (!entry.includes(':')) {
+                    console.log(`[updatecards] Invalid wanted entry format: ${entry}`);
                     continue;
                 }
-                const [setName, cardIdStr] = card.split(':');
-                if (!setName || !cardIdStr) {
-                    console.log(`[updatecards] Invalid wanted card: ${card}`);
+                const [cardKey, idStr] = entry.split(':');
+                if (!cardKey || !idStr) {
+                    console.log(`[updatecards] Invalid wanted entry: ${entry}`);
                     continue;
                 }
-                const isRemove = cardIdStr.startsWith('-');
-                const cardId = isRemove ? cardIdStr.substring(1) : cardIdStr;
-                if (!cardId || isNaN(parseInt(cardId))) {
-                    console.log(`[updatecards] Invalid cardId in wanted card: ${card}`);
-                    continue;
-                }
-                const wantedPath = `${username}/wanted/${setName}:${cardId}`;
-                if (isRemove) {
-                    console.log(`[updatecards] Attempting to remove from wanted list: ${wantedPath}`);
-                    const wantedSnapshot = await cardsRef.child(wantedPath).once('value');
-                    if (wantedSnapshot.exists()) {
-                        await cardsRef.child(wantedPath).remove();
-                        console.log(`[updatecards] Successfully removed from wanted list: ${wantedPath}`);
+                const wantedPath = `${username}/wanted/${cardKey}`;
+                if (idStr.startsWith('-')) {
+                    const idsToRemove = idStr.substring(1).split(',').filter(id => id && !isNaN(parseInt(id)));
+                    if (idsToRemove.length === 0) {
+                        console.log(`[updatecards] No valid IDs to remove in: ${entry}`);
+                        continue;
+                    }
+                    console.log(`[updatecards] Removing IDs ${idsToRemove.join(',')} from wanted list: ${wantedPath}`);
+                    const snapshot = await cardsRef.child(wantedPath).once('value');
+                    let currentIds = snapshot.val() ? snapshot.val().split(',') : [];
+                    currentIds = currentIds.filter(id => !idsToRemove.includes(id));
+                    if (currentIds.length > 0) {
+                        await cardsRef.child(wantedPath).set(currentIds.join(','));
+                        console.log(`[updatecards] Updated wanted list: ${wantedPath} to ${currentIds.join(',')}`);
                     } else {
-                        console.log(`[updatecards] Card not found in wanted list: ${wantedPath}`);
+                        await cardsRef.child(wantedPath).remove();
+                        console.log(`[updatecards] Removed empty wanted list: ${wantedPath}`);
                     }
                 } else {
-                    console.log(`[updatecards] Adding to wanted list: ${wantedPath}`);
-                    await cardsRef.child(wantedPath).set({}); // Store as empty object
-                    console.log(`[updatecards] Added to wanted list: ${wantedPath}`);
+                    const idsToAdd = idStr.split(',').filter(id => id && !isNaN(parseInt(id)));
+                    if (idsToAdd.length === 0) {
+                        console.log(`[updatecards] No valid IDs to add in: ${entry}`);
+                        continue;
+                    }
+                    console.log(`[updatecards] Adding IDs ${idsToAdd.join(',')} to wanted list: ${wantedPath}`);
+                    const snapshot = await cardsRef.child(wantedPath).once('value');
+                    let currentIds = snapshot.val() ? snapshot.val().split(',') : [];
+                    const uniqueIds = [...new Set([...currentIds, ...idsToAdd])].sort((a, b) => parseInt(a) - parseInt(b));
+                    await cardsRef.child(wantedPath).set(uniqueIds.join(','));
+                    console.log(`[updatecards] Updated wanted list: ${wantedPath} to ${uniqueIds.join(',')}`);
                 }
             }
         }
@@ -339,15 +358,19 @@ app.get('/updatecards', async (req, res) => {
         for (const user in cardsData) {
             if (cardsData[user].wanted) {
                 const wanted = {};
-                for (const card in cardsData[user].wanted) {
-                    // Include card if it exists (boolean true or any value)
-                    if (cardsData[user].wanted[card] === true || cardsData[user].wanted[card] !== null) {
-                        wanted[card] = {};
+                for (const cardKey in cardsData[user].wanted) {
+                    if (cardsData[user].wanted[cardKey] === true) {
+                        wanted[cardKey] = "0"; // Convert old boolean format
+                        await cardsRef.child(`${user}/wanted/${cardKey}`).set("0");
+                    } else if (typeof cardsData[user].wanted[cardKey] === 'object' && cardsData[user].wanted[cardKey] !== null) {
+                        const ids = Object.keys(cardsData[user].wanted[cardKey]).filter(id => cardsData[user].wanted[cardKey][id] === true);
+                        wanted[cardKey] = ids.join(',');
+                        await cardsRef.child(`${user}/wanted/${cardKey}`).set(ids.join(','));
+                    } else if (typeof cardsData[user].wanted[cardKey] === 'string') {
+                        wanted[cardKey] = cardsData[user].wanted[cardKey];
                     }
                 }
                 cardsData[user].wanted = wanted;
-                await cardsRef.child(`${user}/wanted`).set(wanted);
-                console.log(`[updatecards] Normalized wanted for user: ${user}`);
             }
             if (cardsData[user].sve && Array.isArray(cardsData[user].sve)) {
                 const sveObject = {};
@@ -358,7 +381,6 @@ app.get('/updatecards', async (req, res) => {
                 });
                 cardsData[user].sve = sveObject;
                 await cardsRef.child(`${user}/sve`).set(sveObject);
-                console.log(`[updatecards] Normalized sve for user: ${user}`);
             }
         }
 
