@@ -316,7 +316,8 @@ app.get('/updatecards', async (req, res) => {
                 }
                 const wantedPath = `${username}/wanted/${setName}`;
                 if (cardIdStr.startsWith('-')) {
-                    const cardIdsToRemove = cardIdStr.substring(1).split(',').filter(id => id && !isNaN(parseInt(id)));
+                    // Split card IDs and remove leading '-' from each
+                    const cardIdsToRemove = cardIdStr.substring(1).split(',').map(id => id.startsWith('-') ? id.substring(1) : id).filter(id => id && !isNaN(parseInt(id)));
                     if (cardIdsToRemove.length === 0) {
                         console.log(`[updatecards] No valid card IDs to remove in: ${entry}`);
                         continue;
