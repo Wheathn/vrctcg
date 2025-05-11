@@ -120,7 +120,7 @@ app.get('/send', async (req, res) => {
             console.log(`Message saved: ${username}: ${msg}`);
         }
 
-        const limit = Math.min(parseInt(req.query.limit) || 100, 100); // Match /loadchat
+        const limit = Math.min(parseInt(req.query.limit) || 100, 100);
         const query = messagesRef.orderByChild('timestamp').limitToLast(limit);
         const messagesSnapshot = await query.once('value');
         const data = messagesSnapshot.val() || {};
@@ -130,7 +130,7 @@ app.get('/send', async (req, res) => {
                 msg: data[key].msg,
                 timestamp: data[key].timestamp
             }))
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
         res.json({ messages: chatLog });
     } catch (err) {
@@ -150,8 +150,8 @@ app.get('/loadchat', async (req, res) => {
     }
 
     try {
-        const limit = Math.min(parseInt(req.query.limit) || 100, 100); // Default 100, max 100
-        const startAt = req.query.startAt || null; // ISO timestamp for pagination
+        const limit = Math.min(parseInt(req.query.limit) || 100, 100);
+        const startAt = req.query.startAt || null;
 
         let query = messagesRef.orderByChild('timestamp').limitToLast(limit);
         if (startAt) {
@@ -166,7 +166,7 @@ app.get('/loadchat', async (req, res) => {
                 msg: data[key].msg,
                 timestamp: data[key].timestamp
             }))
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
         const nextStartAt = chatLog.length === limit && chatLog.length > 0
             ? chatLog[chatLog.length - 1].timestamp
@@ -195,7 +195,18 @@ app.get('/cards', async (req, res) => {
         const cardsSnapshot = await cardsRef.once('value');
         let cardsData = cardsSnapshot.val() || {};
 
+        // Normalize data for compatibility with client
         for (const username in cardsData) {
+            if (cardsData[username].wanted) {
+                const wanted = {};
+                for (const card in cardsData[username].wanted) {
+                    // Include card if it exists (boolean true or any value)
+                    if (cardsData[username].wanted[card] === true || cardsData[username].wanted[card] !== null) {
+                        wanted[card] = {};
+                    }
+                }
+                cardsData[username].wanted = wanted;
+            }
             if (cardsData[username].sve && Array.isArray(cardsData[username].sve)) {
                 const sveObject = {};
                 cardsData[username].sve.forEach((value, index) => {
@@ -314,7 +325,7 @@ app.get('/updatecards', async (req, res) => {
                     }
                 } else {
                     console.log(`[updatecards] Adding to wanted list: ${wantedPath}`);
-                    await cardsRef.child(wantedPath).set(true);
+                    await cardsRef.child(wantedPath).set({}); // Store as empty object
                     console.log(`[updatecards] Added to wanted list: ${wantedPath}`);
                 }
             }
@@ -324,7 +335,20 @@ app.get('/updatecards', async (req, res) => {
         const cardsSnapshot = await cardsRef.once('value');
         let cardsData = cardsSnapshot.val() || {};
 
+        // Normalize data for consistency
         for (const user in cardsData) {
+            if (cardsData[user].wanted) {
+                const wanted = {};
+                for (const card in cardsData[user].wanted) {
+                    // Include card if it exists (boolean true or any value)
+                    if (cardsData[user].wanted[card] === true || cardsData[user].wanted[card] !== null) {
+                        wanted[card] = {};
+                    }
+                }
+                cardsData[user].wanted = wanted;
+                await cardsRef.child(`${user}/wanted`).set(wanted);
+                console.log(`[updatecards] Normalized wanted for user: ${user}`);
+            }
             if (cardsData[user].sve && Array.isArray(cardsData[user].sve)) {
                 const sveObject = {};
                 cardsData[user].sve.forEach((value, index) => {
