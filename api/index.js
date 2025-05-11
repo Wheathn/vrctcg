@@ -267,7 +267,7 @@ app.get('/updatecards', async (req, res) => {
             console.log(`[updatecards] Registering new user: ${username}`);
             await usersRef.child(username).set({ password });
         } else if (userData.password !== password) {
-            console.log(`[updatecards] Password mismatch for ${username}: stored=${userData.password}, sent=${password}`);
+            console.log(`[updatecards] Password mismatch for ${username}`);
             return res.status(403).json({ error: 'Invalid password' });
         }
 
@@ -292,13 +292,11 @@ app.get('/updatecards', async (req, res) => {
                     }
                     const cardPath = `${username}/${setName}/${cardId}`;
                     if (isRemove) {
-                        console.log(`[updatecards] Attempting to remove card: ${cardPath}`);
+                        console.log(`[updatecards] Removing card: ${cardPath}`);
                         await cardsRef.child(cardPath).remove();
-                        console.log(`[updatecards] Removed card: ${cardPath}`);
                     } else {
                         console.log(`[updatecards] Adding card: ${cardPath}`);
                         await cardsRef.child(cardPath).set('T');
-                        console.log(`[updatecards] Added card: ${cardPath}`);
                     }
                 }
             }
@@ -311,41 +309,41 @@ app.get('/updatecards', async (req, res) => {
                     console.log(`[updatecards] Invalid wanted entry format: ${entry}`);
                     continue;
                 }
-                const [cardKey, idStr] = entry.split(':');
-                if (!cardKey || !idStr) {
+                const [setName, cardIdStr] = entry.split(':');
+                if (!setName || !cardIdStr) {
                     console.log(`[updatecards] Invalid wanted entry: ${entry}`);
                     continue;
                 }
-                const wantedPath = `${username}/wanted/${cardKey}`;
-                if (idStr.startsWith('-')) {
-                    const idsToRemove = idStr.substring(1).split(',').filter(id => id && !isNaN(parseInt(id)));
-                    if (idsToRemove.length === 0) {
-                        console.log(`[updatecards] No valid IDs to remove in: ${entry}`);
+                const wantedPath = `${username}/wanted/${setName}`;
+                if (cardIdStr.startsWith('-')) {
+                    const cardIdsToRemove = cardIdStr.substring(1).split(',').filter(id => id && !isNaN(parseInt(id)));
+                    if (cardIdsToRemove.length === 0) {
+                        console.log(`[updatecards] No valid card IDs to remove in: ${entry}`);
                         continue;
                     }
-                    console.log(`[updatecards] Removing IDs ${idsToRemove.join(',')} from wanted list: ${wantedPath}`);
+                    console.log(`[updatecards] Removing card IDs ${cardIdsToRemove.join(',')} from wanted list: ${wantedPath}`);
                     const snapshot = await cardsRef.child(wantedPath).once('value');
-                    let currentIds = snapshot.val() ? snapshot.val().split(',') : [];
-                    currentIds = currentIds.filter(id => !idsToRemove.includes(id));
-                    if (currentIds.length > 0) {
-                        await cardsRef.child(wantedPath).set(currentIds.join(','));
-                        console.log(`[updatecards] Updated wanted list: ${wantedPath} to ${currentIds.join(',')}`);
+                    let currentCardIds = snapshot.val() ? snapshot.val().split(',') : [];
+                    currentCardIds = currentCardIds.filter(id => !cardIdsToRemove.includes(id));
+                    if (currentCardIds.length > 0) {
+                        await cardsRef.child(wantedPath).set(currentCardIds.join(','));
+                        console.log(`[updatecards] Updated wanted list: ${wantedPath} to ${currentCardIds.join(',')}`);
                     } else {
                         await cardsRef.child(wantedPath).remove();
                         console.log(`[updatecards] Removed empty wanted list: ${wantedPath}`);
                     }
                 } else {
-                    const idsToAdd = idStr.split(',').filter(id => id && !isNaN(parseInt(id)));
-                    if (idsToAdd.length === 0) {
-                        console.log(`[updatecards] No valid IDs to add in: ${entry}`);
+                    const cardIdsToAdd = cardIdStr.split(',').filter(id => id && !isNaN(parseInt(id)));
+                    if (cardIdsToAdd.length === 0) {
+                        console.log(`[updatecards] No valid card IDs to add in: ${entry}`);
                         continue;
                     }
-                    console.log(`[updatecards] Adding IDs ${idsToAdd.join(',')} to wanted list: ${wantedPath}`);
+                    console.log(`[updatecards] Adding card IDs ${cardIdsToAdd.join(',')} to wanted list: ${wantedPath}`);
                     const snapshot = await cardsRef.child(wantedPath).once('value');
-                    let currentIds = snapshot.val() ? snapshot.val().split(',') : [];
-                    const uniqueIds = [...new Set([...currentIds, ...idsToAdd])].sort((a, b) => parseInt(a) - parseInt(b));
-                    await cardsRef.child(wantedPath).set(uniqueIds.join(','));
-                    console.log(`[updatecards] Updated wanted list: ${wantedPath} to ${uniqueIds.join(',')}`);
+                    let currentCardIds = snapshot.val() ? snapshot.val().split(',') : [];
+                    const newCardIds = [...new Set([...currentCardIds, ...cardIdsToAdd])];
+                    await cardsRef.child(wantedPath).set(newCardIds.join(','));
+                    console.log(`[updatecards] Updated wanted list: ${wantedPath} to ${newCardIds.join(',')}`);
                 }
             }
         }
@@ -358,16 +356,16 @@ app.get('/updatecards', async (req, res) => {
         for (const user in cardsData) {
             if (cardsData[user].wanted) {
                 const wanted = {};
-                for (const cardKey in cardsData[user].wanted) {
-                    if (cardsData[user].wanted[cardKey] === true) {
-                        wanted[cardKey] = "0"; // Convert old boolean format
-                        await cardsRef.child(`${user}/wanted/${cardKey}`).set("0");
-                    } else if (typeof cardsData[user].wanted[cardKey] === 'object' && cardsData[user].wanted[cardKey] !== null) {
-                        const ids = Object.keys(cardsData[user].wanted[cardKey]).filter(id => cardsData[user].wanted[cardKey][id] === true);
-                        wanted[cardKey] = ids.join(',');
-                        await cardsRef.child(`${user}/wanted/${cardKey}`).set(ids.join(','));
-                    } else if (typeof cardsData[user].wanted[cardKey] === 'string') {
-                        wanted[cardKey] = cardsData[user].wanted[cardKey];
+                for (const setKey in cardsData[user].wanted) {
+                    if (cardsData[user].wanted[setKey] === true) {
+                        wanted[setKey] = "0";
+                        await cardsRef.child(`${user}/wanted/${setKey}`).set("0");
+                    } else if (typeof cardsData[user].wanted[setKey] === 'object' && cardsData[user].wanted[setKey] !== null) {
+                        const cardIds = Object.keys(cardsData[user].wanted[setKey]).filter(id => cardsData[user].wanted[setKey][id] === true);
+                        wanted[setKey] = cardIds.join(',');
+                        await cardsRef.child(`${user}/wanted/${setKey}`).set(cardIds.join(','));
+                    } else if (typeof cardsData[user].wanted[setKey] === 'string') {
+                        wanted[setKey] = cardsData[user].wanted[setKey];
                     }
                 }
                 cardsData[user].wanted = wanted;
