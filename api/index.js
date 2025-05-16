@@ -396,7 +396,7 @@ app.get('/trades', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
-    if (!firebaseInitialized || !usersRef || !cardsRef || !db) {
+    if (!firebaseInitialized || !usersRef || !db) {
         console.error('Firebase not available for /trades');
         return res.status(500).json({ error: 'Database unavailable' });
     }
@@ -419,57 +419,30 @@ app.get('/trades', async (req, res) => {
     }
 
     try {
-        // Authenticate user
+        // Authenticate or register user
         const userSnapshot = await usersRef.child(username).once('value');
         const userData = userSnapshot.val();
         if (!userData) {
-            console.log(`[trades] User not found: ${username}`);
-            return res.status(403).json({ error: 'User not registered' });
-        }
-        if (userData.password !== password) {
+            console.log(`[trades] Registering new user: ${username}`);
+            await usersRef.child(username).set({ password });
+        } else if (userData.password !== password) {
             console.log(`[trades] Password mismatch for ${username}`);
             return res.status(403).json({ error: 'Invalid password' });
         }
 
-        // Validate offered cards
+        // Validate card format (ensure non-empty and contains ':')
         const cardList = cards.split(',').filter(card => card.includes(':'));
         if (cardList.length === 0) {
             console.log(`[trades] No valid cards provided: ${cards}`);
             return res.status(400).json({ error: 'No valid cards provided' });
         }
 
-        const cardsSnapshot = await cardsRef.child(username).once('value');
-        const userCards = cardsSnapshot.val() || {};
-        let allCardsValid = true;
-        const cardEntries = [];
-
-        for (const card of cardList) {
-            const [setName, cardId] = card.split(':');
-            if (!setName || !cardId || isNaN(parseInt(cardId))) {
-                console.log(`[trades] Invalid card format: ${card}`);
-                allCardsValid = false;
-                break;
-            }
-            const cardPath = `${setName}/${cardId}`;
-            if (!userCards[setName] || !userCards[setName][cardId] || userCards[setName][cardId] !== 'T') {
-                console.log(`[trades] User ${username} does not own card: ${cardPath}`);
-                allCardsValid = false;
-                break;
-            }
-            cardEntries.push(card);
-        }
-
-        if (!allCardsValid) {
-            console.log(`[trades] Trade invalid: Not all cards owned by ${username}`);
-            return res.status(400).json({ cantrade: false, error: 'Not all offered cards are owned' });
-        }
-
         // Store trade data
         const serverTime = new Date().toISOString().replace(/[:.]/g, '-'); // e.g., 2025-05-15T12-00-00-000Z
         const tradeKey = `${serverTime}_${otherUsername}`;
         const tradePath = `Trades/${username}/${tradeKey}`;
-        await db.ref(tradePath).set(cardEntries);
-        console.log(`[trades] Stored trade: ${tradePath} with cards: ${cardEntries.join(', ')}`);
+        await db.ref(tradePath).set(cardList);
+        console.log(`[trades] Stored trade: ${tradePath} with cards: ${cardList.join(', ')}`);
 
         // Return success
         res.json({ cantrade: true });
