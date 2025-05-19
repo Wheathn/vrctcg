@@ -452,6 +452,15 @@ app.get('/trades', async (req, res) => {
     }
 });
 
+app.get('/date', (req, res) => {
+    console.log('Handling /date');
+    const userAgent = req.headers['user-agent'] || '';
+    console.log('User-Agent:', userAgent);
+    const currentDate = new Date().toISOString().split('T')[0];
+    res.send(currentDate);
+    console.log(`[date] Returned date: ${currentDate}`);
+});
+
 // Catch-all for unmatched routes
 app.use((req, res) => {
     console.log(`Unmatched route: ${req.method} ${req.url}`);
