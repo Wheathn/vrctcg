@@ -461,10 +461,33 @@ app.get('/date', (req, res) => {
     console.log(`[date] Returned date: ${currentDate}`);
 });
 
+app.get('/checkgifts', async (req, res) => {
+    console.log('Handling /checkgifts');
+    const restriction = restrictToVRChat(req, res);
+    if (restriction) return restriction;
+
+    if (!firebaseInitialized || !db) {
+        console.error('Firebase not available for /checkgifts');
+        return res.status(500).json({ error: 'Database unavailable' });
+    }
+
+    try {
+        const snapshot = await db.ref('gifted').once('value');
+        const giftedData = snapshot.val() || {};
+        console.log('[checkgifts] Retrieved gifted data');
+        res.json(giftedData);
+    } catch (err) {
+        console.error('Error in /checkgifts:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
 // Catch-all for unmatched routes
 app.use((req, res) => {
     console.log(`Unmatched route: ${req.method} ${req.url}`);
     res.status(404).json({ error: 'Route not found' });
 });
+
+require('./bot.js');
 
 module.exports = app;
