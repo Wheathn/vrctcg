@@ -506,6 +506,7 @@ app.get('/checkgifts', async (req, res) => {
         const timestamp = new Date();
         const timestampStr = timestamp.toISOString();
         const encryptedTimestamp = hexShiftEncrypt(timestampStr);
+        console.log(`[checkgifts] Generated timestamp: ${timestampStr}, Encrypted: ${encryptedTimestamp}`);
 
         // Combine timestamp and gifts data
         const responseData = {
