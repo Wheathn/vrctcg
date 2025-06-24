@@ -28,6 +28,10 @@ const cardsRef = db ? db.ref('cards') : null;
 const XOR_KEY = 0x5A;
 const SHIFT_VALUE = 42;
 
+// Rate limiting storage for /checkgifts
+const requestTimestamps = new Map();
+const RATE_LIMIT_MS = 5000; // 5 seconds
+
 function hexDecode(hexString) {
     if (!hexString || hexString.length % 2 !== 0) return '';
     let result = '';
@@ -57,6 +61,18 @@ function restrictToVRChat(req, res) {
         return res.status(403).json({ error: 'Access restricted to VRChat' });
     }
     return null;
+}
+
+// Hex-shift encryption with fixed shift value
+const HEX_SHIFT = 42; // Fixed shift value
+function hexShiftEncrypt(text) {
+    let result = '';
+    for (let i = 0; i < text.length; i++) {
+        const charCode = text.charCodeAt(i);
+        const shifted = (charCode + HEX_SHIFT) % 256;
+        result += shifted.toString(16).padStart(2, '0');
+    }
+    return result;
 }
 
 // Debug route to test Firebase
@@ -471,16 +487,49 @@ app.get('/checkgifts', async (req, res) => {
         return res.status(500).json({ error: 'Database unavailable' });
     }
 
+    // Rate limiting based on client IP
+    const clientIp = req.ip || req.connection.remoteAddress;
+    const now = Date.now();
+    const lastRequestTime = requestTimestamps.get(clientIp) || 0;
+    if (now - lastRequestTime < RATE_LIMIT_MS) {
+        console.log(`[checkgifts] Rate limit exceeded for IP: ${clientIp}`);
+        return res.status(429).json({ error: 'Rate limit exceeded. Try again later.' });
+    }
+    requestTimestamps.set(clientIp, now);
+
     try {
         const snapshot = await db.ref('gifted').once('value');
         const giftedData = snapshot.val() || {};
         console.log('[checkgifts] Retrieved gifted data');
-        res.json(giftedData);
+
+        // Generate and encrypt timestamp
+        const timestamp = new Date();
+        const timestampStr = timestamp.toISOString();
+        const encryptedTimestamp = hexShiftEncrypt(timestampStr);
+
+        // Combine timestamp and gifts data
+        const responseData = {
+            timestamp: encryptedTimestamp,
+            gifts: giftedData
+        };
+
+        res.json(responseData);
+        console.log('[checkgifts] Sent response with encrypted timestamp');
     } catch (err) {
         console.error('Error in /checkgifts:', err.message);
         res.status(500).json({ error: 'Server error' });
     }
 });
+
+// Clean up old timestamps periodically
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, timestamp] of requestTimestamps.entries()) {
+        if (now - timestamp > RATE_LIMIT_MS) {
+            requestTimestamps.delete(ip);
+        }
+    }
+}, 60000); // Run every minute
 
 // Catch-all for unmatched routes
 app.use((req, res) => {
