@@ -468,6 +468,44 @@ app.get('/trades', async (req, res) => {
     }
 });
 
+app.get('/checkcd', async (req, res) => {
+    console.log('Handling /checkcd');
+    const restriction = restrictToVRChat(req, res);
+    if (restriction) return restriction;
+
+    if (!firebaseInitialized || !usersRef) {
+        console.error('Firebase not available for /checkcd');
+        return res.status(500).json({ error: 'Database unavailable' });
+    }
+
+    try {
+        const usersSnapshot = await usersRef.once('value');
+        const usersData = usersSnapshot.val() || {};
+        const result = {};
+
+        for (const username in usersData) {
+            const userData = usersData[username];
+            const userEntry = {};
+            if (userData.cooldown) {
+                const cooldownTime = new Date(userData.cooldown);
+                const currentTime = new Date();
+                const timeDiffMs = currentTime - cooldownTime;
+                const hours = Math.floor(timeDiffMs / (1000 * 60 * 60));
+                const minutes = Math.floor((timeDiffMs % (1000 * 60 * 60)) / (1000 * 60));
+                userEntry.cooldown = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+            }
+            result[username] = userEntry;
+        }
+
+        const resultString = JSON.stringify(result);
+        console.log(`[checkcd] Returning cooldown data: ${resultString}`);
+        res.send(resultString);
+    } catch (err) {
+        console.error(`[checkcd] Error fetching cooldowns: ${err.message}`);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
 app.get('/date', (req, res) => {
     console.log('Handling /date');
     const userAgent = req.headers['user-agent'] || '';
@@ -475,51 +513,6 @@ app.get('/date', (req, res) => {
     const currentDate = new Date().toISOString().split('T')[0];
     res.send(currentDate);
     console.log(`[date] Returned date: ${currentDate}`);
-});
-
-app.get('/checkgifts', async (req, res) => {
-    console.log('Handling /checkgifts');
-    const restriction = restrictToVRChat(req, res);
-    if (restriction) return restriction;
-
-    if (!firebaseInitialized || !db) {
-        console.error('Firebase not available for /checkgifts');
-        return res.status(500).json({ error: 'Database unavailable' });
-    }
-
-    // Rate limiting based on client IP
-    const clientIp = req.ip || req.connection.remoteAddress;
-    const now = Date.now();
-    const lastRequestTime = requestTimestamps.get(clientIp) || 0;
-    if (now - lastRequestTime < RATE_LIMIT_MS) {
-        console.log(`[checkgifts] Rate limit exceeded for IP: ${clientIp}`);
-        return res.status(429).json({ error: 'Rate limit exceeded. Try again later.' });
-    }
-    requestTimestamps.set(clientIp, now);
-
-    try {
-        const snapshot = await db.ref('gifted').once('value');
-        const giftedData = snapshot.val() || {};
-        console.log('[checkgifts] Retrieved gifted data');
-
-        // Generate and encrypt timestamp
-        const timestamp = new Date();
-        const timestampStr = timestamp.toISOString();
-        const encryptedTimestamp = hexShiftEncrypt(timestampStr);
-        console.log(`[checkgifts] Generated timestamp: ${timestampStr}, Encrypted: ${encryptedTimestamp}`);
-
-        // Combine timestamp and gifts data
-        const responseData = {
-            timestamp: encryptedTimestamp,
-            gifts: giftedData
-        };
-
-        res.json(responseData);
-        console.log('[checkgifts] Sent response with encrypted timestamp');
-    } catch (err) {
-        console.error('Error in /checkgifts:', err.message);
-        res.status(500).json({ error: 'Server error' });
-    }
 });
 
 // Clean up old timestamps periodically
