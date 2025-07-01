@@ -25,16 +25,14 @@ const messagesRef = db ? db.ref('messages') : null;
 const usersRef = db ? db.ref('users') : null;
 const cardsRef = db ? db.ref('cards') : null;
 const giftLogsRef = db ? db.ref('giftLogs') : null;
-const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null; // Added missing reference
+const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null; // Added for sequential numbering
 
 const XOR_KEY = 0x5A;
 const SHIFT_VALUE = 42;
 
-// Rate limiting storage for /checkgifts and /giveuser
+// Rate limiting storage for /checkgifts
 const requestTimestamps = new Map();
-const giveUserTimestamps = new Map();
 const RATE_LIMIT_MS = 5000; // 5 seconds
-const GIVEUSER_RATE_LIMIT_MS = 5000; // 5 seconds
 
 function hexDecode(hexString) {
     if (!hexString || hexString.length % 2 !== 0) return '';
@@ -519,7 +517,12 @@ app.get('/giveuser', async (req, res) => {
     if (restriction) return restriction;
 
     if (!firebaseInitialized || !usersRef || !giftLogsRef || !giftLogsCounterRef) {
-        console.error('[giveuser] Firebase not available');
+        console.error('[giveuser] Firebase not available:', {
+            firebaseInitialized,
+            usersRef: !!usersRef,
+            giftLogsRef: !!giftLogsRef,
+            giftLogsCounterRef: !!giftLogsCounterRef
+        });
         return res.status(500).json({ error: 'Database unavailable' });
     }
 
@@ -607,16 +610,7 @@ app.get('/giveuser', async (req, res) => {
     }
 });
 
-app.get('/date', (req, res) => {
-    console.log('Handling /date');
-    const userAgent = req.headers['user-agent'] || '';
-    console.log('User-Agent:', userAgent);
-    const currentDate = new Date().toISOString().split('T')[0];
-    res.send(currentDate);
-    console.log(`[date] Returned date: ${currentDate}`);
-});
-
-// Clean up old timestamps periodically
+// Update the cleanup interval to include giveUserTimestamps
 setInterval(() => {
     const now = Date.now();
     for (const [ip, timestamp] of requestTimestamps.entries()) {
@@ -630,6 +624,15 @@ setInterval(() => {
         }
     }
 }, 60000); // Run every minute
+
+app.get('/date', (req, res) => {
+    console.log('Handling /date');
+    const userAgent = req.headers['user-agent'] || '';
+    console.log('User-Agent:', userAgent);
+    const currentDate = new Date().toISOString().split('T')[0];
+    res.send(currentDate);
+    console.log(`[date] Returned date: ${currentDate}`);
+});
 
 // Catch-all for unmatched routes
 app.use((req, res) => {
