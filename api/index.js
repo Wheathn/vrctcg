@@ -506,15 +506,30 @@ app.get('/checkcd', async (req, res) => {
     }
 });
 
+const giftLogsRef = db ? db.ref('giftLogs') : null;
+
+// Rate limiting for /giveuser
+const giveUserTimestamps = new Map();
+const GIVEUSER_RATE_LIMIT_MS = 5000; // 5 seconds
+
 app.get('/giveuser', async (req, res) => {
     console.log('Handling /giveuser');
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
     if (!firebaseInitialized || !usersRef || !giftLogsRef) {
-        console.error('Firebase not available for /giveuser');
+        console.error('[giveuser] Firebase not available');
         return res.status(500).json({ error: 'Database unavailable' });
     }
+
+    // Rate limiting
+    const ip = req.ip || req.connection.remoteAddress;
+    const now = Date.now();
+    if (giveUserTimestamps.has(ip) && now - giveUserTimestamps.get(ip) < GIVEUSER_RATE_LIMIT_MS) {
+        console.log(`[giveuser] Rate limit exceeded for IP: ${ip}`);
+        return res.status(429).json({ error: 'Too many requests, please try again later' });
+    }
+    giveUserTimestamps.set(ip, now);
 
     const obfuscatedUsername = req.query.n || '';
     const obfuscatedPassword = req.query.p || '';
@@ -529,6 +544,7 @@ app.get('/giveuser', async (req, res) => {
 
     console.log(`[giveuser] Received: username=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
 
+    // Validate inputs
     if (!username || !password || !targetUsername || !pack || !amount) {
         console.log(`[giveuser] Missing required parameters: username=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
         return res.status(400).json({ error: 'Username, password, target, pack, and amount required' });
@@ -540,15 +556,23 @@ app.get('/giveuser', async (req, res) => {
     }
 
     try {
-        // Authenticate user
+        // Authenticate requesting user
         const userSnapshot = await usersRef.child(username).once('value');
         const userData = userSnapshot.val();
         if (!userData) {
             console.log(`[giveuser] User not found: ${username}`);
             return res.status(403).json({ error: 'User not found' });
-        } else if (userData.password !== password) {
+        }
+        if (userData.password !== password) {
             console.log(`[giveuser] Password mismatch for ${username}`);
             return res.status(403).json({ error: 'Invalid password' });
+        }
+
+        // Check if target user exists
+        const targetSnapshot = await usersRef.child(targetUsername).once('value');
+        if (!targetSnapshot.val()) {
+            console.log(`[giveuser] Target user not found: ${targetUsername}`);
+            return res.status(400).json({ error: 'Target user not found' });
         }
 
         // Update target user's cooldown
@@ -556,28 +580,39 @@ app.get('/giveuser', async (req, res) => {
         await usersRef.child(targetUsername).update({ cooldown: currentTime });
         console.log(`[giveuser] Updated cooldown for ${targetUsername} to ${currentTime}`);
 
-        // Generate unique number for gift log
-        const giftLogSnapshot = await giftLogsRef.once('value');
-        const giftLogs = giftLogSnapshot.val() || {};
-        const logNumber = Object.keys(giftLogs).length + 1; // Incremental number
-        const logPath = `${logNumber}/${username}`;
-
-        // Store gift log
-        await giftLogsRef.child(logPath).set({
-            timestamp: currentTime,
+        // Store gift log with a Firebase push key for uniqueness
+        const giftRef = giftLogsRef.push();
+        await giftRef.set({
+            sender: username,
             target: targetUsername,
-            pack: pack,
-            amount: amount
+            pack: parseInt(pack),
+            amount: parseInt(amount),
+            timestamp: currentTime
         });
-        console.log(`[giveuser] Logged gift at ${logPath}: timestamp=${currentTime}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
+        console.log(`[giveuser] Logged gift at ${giftRef.key}: sender=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
 
         // Return success
         res.json({ success: true });
     } catch (err) {
         console.error(`[giveuser] Error processing gift: ${err.message}`);
-        res.status(500).json({ error: 'Server error' });
+        res.status(500).json({ error: `Server error: ${err.message}` });
     }
 });
+
+// Update the cleanup interval to include giveUserTimestamps
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, timestamp] of requestTimestamps.entries()) {
+        if (now - timestamp > RATE_LIMIT_MS) {
+            requestTimestamps.delete(ip);
+        }
+    }
+    for (const [ip, timestamp] of giveUserTimestamps.entries()) {
+        if (now - timestamp > GIVEUSER_RATE_LIMIT_MS) {
+            giveUserTimestamps.delete(ip);
+        }
+    }
+}, 60000); // Run every minute
 
 app.get('/date', (req, res) => {
     console.log('Handling /date');
@@ -587,16 +622,6 @@ app.get('/date', (req, res) => {
     res.send(currentDate);
     console.log(`[date] Returned date: ${currentDate}`);
 });
-
-// Clean up old timestamps periodically
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, timestamp] of requestTimestamps.entries()) {
-        if (now - timestamp > RATE_LIMIT_MS) {
-            requestTimestamps.delete(ip);
-        }
-    }
-}, 60000); // Run every minute
 
 // Catch-all for unmatched routes
 app.use((req, res) => {
