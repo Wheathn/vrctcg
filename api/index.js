@@ -517,7 +517,7 @@ app.get('/giveuser', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
-    if (!firebaseInitialized || !usersRef || !giftLogsRef) {
+    if (!firebaseInitialized || !usersRef || !giftLogsRef || !giftLogsCounterRef) {
         console.error('[giveuser] Firebase not available');
         return res.status(500).json({ error: 'Database unavailable' });
     }
@@ -580,16 +580,23 @@ app.get('/giveuser', async (req, res) => {
         await usersRef.child(targetUsername).update({ cooldown: currentTime });
         console.log(`[giveuser] Updated cooldown for ${targetUsername} to ${currentTime}`);
 
-        // Store gift log with a Firebase push key for uniqueness
-        const giftRef = giftLogsRef.push();
-        await giftRef.set({
+        // Atomically increment gift log counter
+        let logNumber;
+        await giftLogsCounterRef.transaction(current => {
+            logNumber = (current || -1) + 1;
+            return logNumber;
+        });
+        console.log(`[giveuser] Assigned log number: ${logNumber}`);
+
+        // Store gift log with sequential number
+        await giftLogsRef.child(logNumber.toString()).set({
             sender: username,
             target: targetUsername,
             pack: parseInt(pack),
             amount: parseInt(amount),
             timestamp: currentTime
         });
-        console.log(`[giveuser] Logged gift at ${giftRef.key}: sender=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
+        console.log(`[giveuser] Logged gift at giftLogs/${logNumber}: sender=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
 
         // Return success
         res.json({ success: true });
