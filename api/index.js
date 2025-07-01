@@ -24,6 +24,7 @@ const db = firebaseInitialized ? admin.database() : null;
 const messagesRef = db ? db.ref('messages') : null;
 const usersRef = db ? db.ref('users') : null;
 const cardsRef = db ? db.ref('cards') : null;
+const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null;
 
 const XOR_KEY = 0x5A;
 const SHIFT_VALUE = 42;
