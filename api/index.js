@@ -506,6 +506,79 @@ app.get('/checkcd', async (req, res) => {
     }
 });
 
+app.get('/giveuser', async (req, res) => {
+    console.log('Handling /giveuser');
+    const restriction = restrictToVRChat(req, res);
+    if (restriction) return restriction;
+
+    if (!firebaseInitialized || !usersRef || !giftLogsRef) {
+        console.error('Firebase not available for /giveuser');
+        return res.status(500).json({ error: 'Database unavailable' });
+    }
+
+    const obfuscatedUsername = req.query.n || '';
+    const obfuscatedPassword = req.query.p || '';
+    const targetUsername = req.query.t || '';
+    const pack = req.query.s || '';
+    const amount = req.query.a || '';
+
+    const encodedUsername = deobfuscate(obfuscatedUsername);
+    const encodedPassword = deobfuscate(obfuscatedPassword);
+    const username = hexDecode(encodedUsername);
+    const password = hexDecode(encodedPassword);
+
+    console.log(`[giveuser] Received: username=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
+
+    if (!username || !password || !targetUsername || !pack || !amount) {
+        console.log(`[giveuser] Missing required parameters: username=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
+        return res.status(400).json({ error: 'Username, password, target, pack, and amount required' });
+    }
+
+    if (isNaN(parseInt(pack)) || isNaN(parseInt(amount))) {
+        console.log(`[giveuser] Invalid pack or amount: pack=${pack}, amount=${amount}`);
+        return res.status(400).json({ error: 'Pack and amount must be numeric' });
+    }
+
+    try {
+        // Authenticate user
+        const userSnapshot = await usersRef.child(username).once('value');
+        const userData = userSnapshot.val();
+        if (!userData) {
+            console.log(`[giveuser] User not found: ${username}`);
+            return res.status(403).json({ error: 'User not found' });
+        } else if (userData.password !== password) {
+            console.log(`[giveuser] Password mismatch for ${username}`);
+            return res.status(403).json({ error: 'Invalid password' });
+        }
+
+        // Update target user's cooldown
+        const currentTime = new Date().toISOString();
+        await usersRef.child(targetUsername).update({ cooldown: currentTime });
+        console.log(`[giveuser] Updated cooldown for ${targetUsername} to ${currentTime}`);
+
+        // Generate unique number for gift log
+        const giftLogSnapshot = await giftLogsRef.once('value');
+        const giftLogs = giftLogSnapshot.val() || {};
+        const logNumber = Object.keys(giftLogs).length + 1; // Incremental number
+        const logPath = `${logNumber}/${username}`;
+
+        // Store gift log
+        await giftLogsRef.child(logPath).set({
+            timestamp: currentTime,
+            target: targetUsername,
+            pack: pack,
+            amount: amount
+        });
+        console.log(`[giveuser] Logged gift at ${logPath}: timestamp=${currentTime}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
+
+        // Return success
+        res.json({ success: true });
+    } catch (err) {
+        console.error(`[giveuser] Error processing gift: ${err.message}`);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
 app.get('/date', (req, res) => {
     console.log('Handling /date');
     const userAgent = req.headers['user-agent'] || '';
