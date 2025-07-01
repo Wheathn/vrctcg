@@ -24,14 +24,17 @@ const db = firebaseInitialized ? admin.database() : null;
 const messagesRef = db ? db.ref('messages') : null;
 const usersRef = db ? db.ref('users') : null;
 const cardsRef = db ? db.ref('cards') : null;
-const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null;
+const giftLogsRef = db ? db.ref('giftLogs') : null;
+const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null; // Added missing reference
 
 const XOR_KEY = 0x5A;
 const SHIFT_VALUE = 42;
 
-// Rate limiting storage for /checkgifts
+// Rate limiting storage for /checkgifts and /giveuser
 const requestTimestamps = new Map();
+const giveUserTimestamps = new Map();
 const RATE_LIMIT_MS = 5000; // 5 seconds
+const GIVEUSER_RATE_LIMIT_MS = 5000; // 5 seconds
 
 function hexDecode(hexString) {
     if (!hexString || hexString.length % 2 !== 0) return '';
@@ -333,7 +336,6 @@ app.get('/updatecards', async (req, res) => {
                 }
                 const wantedPath = `${username}/wanted/${setName}`;
                 if (cardIdStr.startsWith('-')) {
-                    // Split card IDs and remove leading '-' from each
                     const cardIdsToRemove = cardIdStr.substring(1).split(',').map(id => id.startsWith('-') ? id.substring(1) : id).filter(id => id && !isNaN(parseInt(id)));
                     if (cardIdsToRemove.length === 0) {
                         console.log(`[updatecards] No valid card IDs to remove in: ${entry}`);
@@ -507,8 +509,6 @@ app.get('/checkcd', async (req, res) => {
     }
 });
 
-const giftLogsRef = db ? db.ref('giftLogs') : null;
-
 // Rate limiting for /giveuser
 const giveUserTimestamps = new Map();
 const GIVEUSER_RATE_LIMIT_MS = 5000; // 5 seconds
@@ -607,7 +607,16 @@ app.get('/giveuser', async (req, res) => {
     }
 });
 
-// Update the cleanup interval to include giveUserTimestamps
+app.get('/date', (req, res) => {
+    console.log('Handling /date');
+    const userAgent = req.headers['user-agent'] || '';
+    console.log('User-Agent:', userAgent);
+    const currentDate = new Date().toISOString().split('T')[0];
+    res.send(currentDate);
+    console.log(`[date] Returned date: ${currentDate}`);
+});
+
+// Clean up old timestamps periodically
 setInterval(() => {
     const now = Date.now();
     for (const [ip, timestamp] of requestTimestamps.entries()) {
@@ -621,15 +630,6 @@ setInterval(() => {
         }
     }
 }, 60000); // Run every minute
-
-app.get('/date', (req, res) => {
-    console.log('Handling /date');
-    const userAgent = req.headers['user-agent'] || '';
-    console.log('User-Agent:', userAgent);
-    const currentDate = new Date().toISOString().split('T')[0];
-    res.send(currentDate);
-    console.log(`[date] Returned date: ${currentDate}`);
-});
 
 // Catch-all for unmatched routes
 app.use((req, res) => {
