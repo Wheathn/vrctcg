@@ -10,6 +10,9 @@ const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
     ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
     : {};
 try {
+    if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
+        throw new Error('Invalid FIREBASE_SERVICE_ACCOUNT: missing required fields');
+    }
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         databaseURL: 'https://vrctcg-default-rtdb.firebaseio.com/'
@@ -18,14 +21,16 @@ try {
     console.log('Firebase initialized successfully');
 } catch (error) {
     console.error('Firebase initialization error:', error.message);
+    firebaseInitialized = false;
 }
 
 const db = firebaseInitialized ? admin.database() : null;
 const messagesRef = db ? db.ref('messages') : null;
+const messagesCounterRef = db ? db.ref('messagesCounter') : null;
 const usersRef = db ? db.ref('users') : null;
 const cardsRef = db ? db.ref('cards') : null;
 const giftLogsRef = db ? db.ref('giftLogs') : null;
-const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null; // Added for sequential numbering
+const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null;
 
 const XOR_KEY = 0x5A;
 const SHIFT_VALUE = 42;
@@ -65,8 +70,7 @@ function restrictToVRChat(req, res) {
     return null;
 }
 
-// Hex-shift encryption with fixed shift value
-const HEX_SHIFT = 42; // Fixed shift value
+const HEX_SHIFT = 42;
 function hexShiftEncrypt(text) {
     let result = '';
     for (let i = 0; i < text.length; i++) {
@@ -77,7 +81,6 @@ function hexShiftEncrypt(text) {
     return result;
 }
 
-// Debug route to test Firebase
 app.get('/debug', async (req, res) => {
     if (!firebaseInitialized || !db) {
         return res.status(500).json({ error: 'Firebase not initialized' });
@@ -98,7 +101,12 @@ app.get('/send', async (req, res) => {
     if (restriction) return restriction;
 
     if (!firebaseInitialized || !messagesRef || !usersRef || !messagesCounterRef) {
-        console.error('Firebase not available for /send');
+        console.error('Firebase not available for /send', {
+            firebaseInitialized,
+            messagesRef: !!messagesRef,
+            usersRef: !!usersRef,
+            messagesCounterRef: !!messagesCounterRef
+        });
         return res.status(500).json({ error: 'Database unavailable' });
     }
 
@@ -129,12 +137,17 @@ app.get('/send', async (req, res) => {
                 return res.status(403).json({ error: 'Invalid password' });
             }
 
-            // Atomically increment message counter
+            // Atomically increment message counter with timeout
             let messageNumber;
-            await messagesCounterRef.transaction(current => {
+            const transactionPromise = messagesCounterRef.transaction(current => {
                 messageNumber = (current || -1) + 1;
                 return messageNumber;
-            });
+            }, { timeout: 5000 }); // 5-second timeout
+
+            await Promise.race([
+                transactionPromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Transaction timeout')), 5000))
+            ]);
             console.log(`Assigned message number: ${messageNumber}`);
 
             // Store message with sequential number
@@ -162,11 +175,15 @@ app.get('/send', async (req, res) => {
 
         res.json({ messages: chatLog });
     } catch (err) {
-        console.error('Error in /send:', err.message);
-        res.status(500).json({ error: 'Server error' });
+        console.error('Error in /send:', {
+            message: err.message,
+            stack: err.stack
+        });
+        res.status(500).json({ error: `Server error: ${err.message}` });
     }
 });
 
+// ... [Rest of the endpoints remain unchanged]
 app.get('/loadchat', async (req, res) => {
     console.log('Handling /loadchat');
 
@@ -222,22 +239,16 @@ app.get('/cards', async (req, res) => {
         const cardsSnapshot = await cardsRef.once('value');
         let cardsData = cardsSnapshot.val() || {};
 
-        // Normalize data for compatibility
         for (const username in cardsData) {
             if (cardsData[username].wanted) {
                 const wanted = {};
                 for (const cardKey in cardsData[username].wanted) {
-                    // Handle old boolean format (e.g., set1:0: true)
                     if (cardsData[username].wanted[cardKey] === true) {
-                        wanted[cardKey] = "0"; // Convert to string with default ID
-                    }
-                    // Handle old object format (e.g., set1:0: { "15": true })
-                    else if (typeof cardsData[username].wanted[cardKey] === 'object' && cardsData[username].wanted[cardKey] !== null) {
+                        wanted[cardKey] = "0";
+                    } else if (typeof cardsData[username].wanted[cardKey] === 'object' && cardsData[username].wanted[cardKey] !== null) {
                         const ids = Object.keys(cardsData[username].wanted[cardKey]).filter(id => cardsData[username].wanted[cardKey][id] === true);
                         wanted[cardKey] = ids.join(',');
-                    }
-                    // Already a string (new format)
-                    else if (typeof cardsData[username].wanted[cardKey] === 'string') {
+                    } else if (typeof cardsData[username].wanted[cardKey] === 'string') {
                         wanted[cardKey] = cardsData[username].wanted[cardKey];
                     }
                 }
@@ -379,7 +390,6 @@ app.get('/updatecards', async (req, res) => {
         const cardsSnapshot = await cardsRef.once('value');
         let cardsData = cardsSnapshot.val() || {};
 
-        // Normalize data for consistency
         for (const user in cardsData) {
             if (cardsData[user].wanted) {
                 const wanted = {};
@@ -445,7 +455,6 @@ app.get('/trades', async (req, res) => {
     }
 
     try {
-        // Authenticate or register user
         const userSnapshot = await usersRef.child(username).once('value');
         const userData = userSnapshot.val();
         if (!userData) {
@@ -456,21 +465,18 @@ app.get('/trades', async (req, res) => {
             return res.status(403).json({ error: 'Invalid password' });
         }
 
-        // Validate card format (ensure non-empty and contains ':')
         const cardList = cards.split(',').filter(card => card.includes(':'));
         if (cardList.length === 0) {
             console.log(`[trades] No valid cards provided: ${cards}`);
             return res.status(400).json({ error: 'No valid cards provided' });
         }
 
-        // Store trade data
-        const serverTime = new Date().toISOString().replace(/[:.]/g, '-'); // e.g., 2025-05-15T12-00-00-000Z
+        const serverTime = new Date().toISOString().replace(/[:.]/g, '-');
         const tradeKey = `${serverTime}_${otherUsername}`;
         const tradePath = `Trades/${username}/${tradeKey}`;
         await db.ref(tradePath).set(cardList);
         console.log(`[trades] Stored trade: ${tradePath} with cards: ${cardList.join(', ')}`);
 
-        // Return success
         res.json({ cantrade: true });
     } catch (err) {
         console.error(`[trades] Error processing trade: ${err.message}`);
@@ -516,9 +522,8 @@ app.get('/checkcd', async (req, res) => {
     }
 });
 
-// Rate limiting for /giveuser
 const giveUserTimestamps = new Map();
-const GIVEUSER_RATE_LIMIT_MS = 5000; // 5 seconds
+const GIVEUSER_RATE_LIMIT_MS = 5000;
 
 app.get('/giveuser', async (req, res) => {
     console.log('Handling /giveuser');
@@ -535,7 +540,6 @@ app.get('/giveuser', async (req, res) => {
         return res.status(500).json({ error: 'Database unavailable' });
     }
 
-    // Rate limiting
     const ip = req.ip || req.connection.remoteAddress;
     const now = Date.now();
     if (giveUserTimestamps.has(ip) && now - giveUserTimestamps.get(ip) < GIVEUSER_RATE_LIMIT_MS) {
@@ -557,7 +561,6 @@ app.get('/giveuser', async (req, res) => {
 
     console.log(`[giveuser] Received: username=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
 
-    // Validate inputs
     if (!username || !password || !targetUsername || !pack || !amount) {
         console.log(`[giveuser] Missing required parameters: username=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
         return res.status(400).json({ error: 'Username, password, target, pack, and amount required' });
@@ -569,7 +572,6 @@ app.get('/giveuser', async (req, res) => {
     }
 
     try {
-        // Authenticate requesting user
         const userSnapshot = await usersRef.child(username).once('value');
         const userData = userSnapshot.val();
         if (!userData) {
@@ -581,19 +583,16 @@ app.get('/giveuser', async (req, res) => {
             return res.status(403).json({ error: 'Invalid password' });
         }
 
-        // Check if target user exists
         const targetSnapshot = await usersRef.child(targetUsername).once('value');
         if (!targetSnapshot.val()) {
             console.log(`[giveuser] Target user not found: ${targetUsername}`);
             return res.status(400).json({ error: 'Target user not found' });
         }
 
-        // Update target user's cooldown
         const currentTime = new Date().toISOString();
         await usersRef.child(targetUsername).update({ cooldown: currentTime });
         console.log(`[giveuser] Updated cooldown for ${targetUsername} to ${currentTime}`);
 
-        // Atomically increment gift log counter
         let logNumber;
         await giftLogsCounterRef.transaction(current => {
             logNumber = (current || -1) + 1;
@@ -601,7 +600,6 @@ app.get('/giveuser', async (req, res) => {
         });
         console.log(`[giveuser] Assigned log number: ${logNumber}`);
 
-        // Store gift log with sequential number
         await giftLogsRef.child(logNumber.toString()).set({
             sender: username,
             target: targetUsername,
@@ -611,7 +609,6 @@ app.get('/giveuser', async (req, res) => {
         });
         console.log(`[giveuser] Logged gift at giftLogs/${logNumber}: sender=${username}, target=${targetUsername}, pack=${pack}, amount=${amount}`);
 
-        // Return success
         res.json({ success: true });
     } catch (err) {
         console.error(`[giveuser] Error processing gift: ${err.message}`);
@@ -619,7 +616,6 @@ app.get('/giveuser', async (req, res) => {
     }
 });
 
-// Update the cleanup interval to include giveUserTimestamps
 setInterval(() => {
     const now = Date.now();
     for (const [ip, timestamp] of requestTimestamps.entries()) {
@@ -632,7 +628,7 @@ setInterval(() => {
             giveUserTimestamps.delete(ip);
         }
     }
-}, 60000); // Run every minute
+}, 60000);
 
 app.get('/date', (req, res) => {
     console.log('Handling /date');
@@ -643,7 +639,6 @@ app.get('/date', (req, res) => {
     console.log(`[date] Returned date: ${currentDate}`);
 });
 
-// Catch-all for unmatched routes
 app.use((req, res) => {
     console.log(`Unmatched route: ${req.method} ${req.url}`);
     res.status(404).json({ error: 'Route not found' });
