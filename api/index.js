@@ -128,6 +128,7 @@ app.get('/send', async (req, res) => {
 
     try {
         if (msg) {
+            // Validate user
             const userSnapshot = await usersRef.child(username).once('value');
             const userData = userSnapshot.val();
             if (!userData) {
@@ -137,17 +138,23 @@ app.get('/send', async (req, res) => {
                 return res.status(403).json({ error: 'Invalid password' });
             }
 
-            // Atomically increment message counter with timeout
-            let messageNumber;
-            const transactionPromise = messagesCounterRef.transaction(current => {
-                messageNumber = (current || -1) + 1;
-                return messageNumber;
-            }, { timeout: 5000 }); // 5-second timeout
+            // Initialize messagesCounter if it doesn't exist
+            const counterSnapshot = await messagesCounterRef.once('value');
+            if (!counterSnapshot.exists()) {
+                await messagesCounterRef.set(-1);
+                console.log('Initialized messagesCounter to -1');
+            }
 
-            await Promise.race([
-                transactionPromise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Transaction timeout')), 5000))
-            ]);
+            // Atomically increment message counter
+            let messageNumber;
+            const transactionResult = await messagesCounterRef.transaction(current => {
+                return (current || -1) + 1;
+            });
+
+            if (!transactionResult.committed) {
+                throw new Error('Transaction failed to commit');
+            }
+            messageNumber = transactionResult.snapshot.val();
             console.log(`Assigned message number: ${messageNumber}`);
 
             // Store message with sequential number
@@ -160,6 +167,7 @@ app.get('/send', async (req, res) => {
             console.log(`Message saved: ${messageNumber} - ${username}: ${msg}`);
         }
 
+        // Retrieve messages
         const limit = Math.min(parseInt(req.query.limit) || 100, 100);
         const query = messagesRef.orderByChild('timestamp').limitToLast(limit);
         const messagesSnapshot = await query.once('value');
