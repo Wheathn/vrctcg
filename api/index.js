@@ -124,7 +124,6 @@ app.get('/send', async (req, res) => {
         if (!username || !password) {
             return res.status(400).json({ error: 'Username and password required for sending messages' });
         }
-        ಸ
     }
 
     try {
@@ -135,6 +134,9 @@ app.get('/send', async (req, res) => {
             if (!userData) {
                 await usersRef.child(username).set({ password });
                 console.log(`Registered new user: ${username}`);
+            } else if (!userData.password) {
+                await usersRef.child(username).update({ password });
+                console.log(`Added password for existing user: ${username}`);
             } else if (userData.password !== password) {
                 return res.status(403).json({ error: 'Invalid password' });
             }
@@ -312,6 +314,9 @@ app.get('/updatecards', async (req, res) => {
         if (!userData) {
             console.log(`[updatecards] Registering new user: ${username}`);
             await usersRef.child(username).set({ password });
+        } else if (!userData.password) {
+            console.log(`[updatecards] Adding password for existing user: ${username}`);
+            await usersRef.child(username).update({ password });
         } else if (userData.password !== password) {
             console.log(`[updatecards] Password mismatch for ${username}`);
             return res.status(403).json({ error: 'Invalid password' });
@@ -468,6 +473,9 @@ app.get('/trades', async (req, res) => {
         if (!userData) {
             console.log(`[trades] Registering new user: ${username}`);
             await usersRef.child(username).set({ password });
+        } else if (!userData.password) {
+            console.log(`[trades] Adding password for existing user: ${username}`);
+            await usersRef.child(username).update({ password });
         } else if (userData.password !== password) {
             console.log(`[trades] Password mismatch for ${username}`);
             return res.status(403).json({ error: 'Invalid password' });
@@ -594,7 +602,6 @@ app.get('/giveuser', async (req, res) => {
         const targetSnapshot = await usersRef.child(targetUsername).once('value');
         if (!targetSnapshot.val()) {
             console.log(`[giveuser] Registering new target user: ${targetUsername}`);
-            // Generate a random password for the new target user since we don't have one
             const randomPassword = Math.random().toString(36).slice(-8);
             await usersRef.child(targetUsername).set({ password: randomPassword });
             console.log(`[giveuser] Created target user ${targetUsername} with random password`);
