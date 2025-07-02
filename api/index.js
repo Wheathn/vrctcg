@@ -602,9 +602,8 @@ app.get('/giveuser', async (req, res) => {
         const targetSnapshot = await usersRef.child(targetUsername).once('value');
         if (!targetSnapshot.val()) {
             console.log(`[giveuser] Registering new target user: ${targetUsername}`);
-            const randomPassword = Math.random().toString(36).slice(-8);
-            await usersRef.child(targetUsername).set({ password: randomPassword });
-            console.log(`[giveuser] Created target user ${targetUsername} with random password`);
+            await usersRef.child(targetUsername).set({});
+            console.log(`[giveuser] Created target user ${targetUsername} without password`);
         }
 
         const currentTime = new Date().toISOString();
