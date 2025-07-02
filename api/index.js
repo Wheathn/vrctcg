@@ -22,10 +22,11 @@ try {
 
 const db = firebaseInitialized ? admin.database() : null;
 const messagesRef = db ? db.ref('messages') : null;
+const messagesCounterRef = db ? db.ref('messagesCounter') : null;
 const usersRef = db ? db.ref('users') : null;
 const cardsRef = db ? db.ref('cards') : null;
 const giftLogsRef = db ? db.ref('giftLogs') : null;
-const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null; // Added for sequential numbering
+const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null;
 
 const XOR_KEY = 0x5A;
 const SHIFT_VALUE = 42;
@@ -66,7 +67,7 @@ function restrictToVRChat(req, res) {
 }
 
 // Hex-shift encryption with fixed shift value
-const HEX_SHIFT = 42; // Fixed shift value
+const HEX_SHIFT = 42;
 function hexShiftEncrypt(text) {
     let result = '';
     for (let i = 0; i < text.length; i++) {
@@ -93,12 +94,12 @@ app.get('/debug', async (req, res) => {
 });
 
 app.get('/send', async (req, res) => {
-    console.log('Handling /');
+    console.log('Handling /send');
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
-    if (!firebaseInitialized || !messagesRef || !usersRef) {
-        console.error('Firebase not available for /');
+    if (!firebaseInitialized || !messagesRef || !usersRef || !messagesCounterRef) {
+        console.error('Firebase not available for /send');
         return res.status(500).json({ error: 'Database unavailable' });
     }
 
@@ -128,39 +129,47 @@ app.get('/send', async (req, res) => {
             } else if (userData.password !== password) {
                 return res.status(403).json({ error: 'Invalid password' });
             }
-            const newMessageRef = messagesRef.push();
+
+            // Atomically increment message counter
+            let messageNumber;
+            await messagesCounterRef.transaction(current => {
+                messageNumber = (current || -1) + 1;
+                return messageNumber;
+            });
+            console.log(`Assigned message number: ${messageNumber}`);
+
+            // Store message with sequential number
             const timestamp = new Date().toISOString();
-            await newMessageRef.set({
+            await messagesRef.child(messageNumber.toString()).set({
                 user: username,
                 msg: msg,
                 timestamp: timestamp
             });
-            console.log(`Message saved: ${username}: ${msg}`);
+            console.log(`Message saved: ${messageNumber} - ${username}: ${msg}`);
         }
 
         const limit = Math.min(parseInt(req.query.limit) || 100, 100);
         const query = messagesRef.orderByChild('timestamp').limitToLast(limit);
         const messagesSnapshot = await query.once('value');
         const data = messagesSnapshot.val() || {};
-        const chatLog = Object.keys(data)
-            .map(key => ({
-                user: data[key].user,
-                msg: data[key].msg,
-                timestamp: data[key].timestamp
+        const chatLog = Object.entries(data)
+            .map(([key, value]) => ({
+                id: key,
+                user: value.user,
+                msg: value.msg,
+                timestamp: value.timestamp
             }))
             .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
         res.json({ messages: chatLog });
     } catch (err) {
-        console.error('Error in /:', err.message);
+        console.error('Error in /send:', err.message);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
 app.get('/loadchat', async (req, res) => {
     console.log('Handling /loadchat');
-    const restriction = restrictToVRChat(req, res);
-    if (restriction) return restriction;
 
     if (!firebaseInitialized || !messagesRef) {
         console.error('Firebase not available for /loadchat');
@@ -178,11 +187,12 @@ app.get('/loadchat', async (req, res) => {
 
         const messagesSnapshot = await query.once('value');
         const data = messagesSnapshot.val() || {};
-        const chatLog = Object.keys(data)
-            .map(key => ({
-                user: data[key].user,
-                msg: data[key].msg,
-                timestamp: data[key].timestamp
+        const chatLog = Object.entries(data)
+            .map(([key, value]) => ({
+                id: key,
+                user: value.user,
+                msg: value.msg,
+                timestamp: value.timestamp
             }))
             .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -218,17 +228,12 @@ app.get('/cards', async (req, res) => {
             if (cardsData[username].wanted) {
                 const wanted = {};
                 for (const cardKey in cardsData[username].wanted) {
-                    // Handle old boolean format (e.g., set1:0: true)
                     if (cardsData[username].wanted[cardKey] === true) {
-                        wanted[cardKey] = "0"; // Convert to string with default ID
-                    }
-                    // Handle old object format (e.g., set1:0: { "15": true })
-                    else if (typeof cardsData[username].wanted[cardKey] === 'object' && cardsData[username].wanted[cardKey] !== null) {
+                        wanted[cardKey] = "0";
+                    } else if (typeof cardsData[username].wanted[cardKey] === 'object' && cardsData[username].wanted[cardKey] !== null) {
                         const ids = Object.keys(cardsData[username].wanted[cardKey]).filter(id => cardsData[username].wanted[cardKey][id] === true);
                         wanted[cardKey] = ids.join(',');
-                    }
-                    // Already a string (new format)
-                    else if (typeof cardsData[username].wanted[cardKey] === 'string') {
+                    } else if (typeof cardsData[username].wanted[cardKey] === 'string') {
                         wanted[cardKey] = cardsData[username].wanted[cardKey];
                     }
                 }
@@ -249,10 +254,10 @@ app.get('/cards', async (req, res) => {
     } catch (err) {
         console.error('Error in /cards:', err.message);
         res.status(500).json({ error: 'Server error' });
-    }
-});
+        lua
+    });
 
-app.get('/updatecards', async (req, res) => {
+app.get '/updatecards', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
@@ -345,7 +350,7 @@ app.get('/updatecards', async (req, res) => {
                     currentCardIds = currentCardIds.filter(id => !cardIdsToRemove.includes(id));
                     if (currentCardIds.length > 0) {
                         await cardsRef.child(wantedPath).set(currentCardIds.join(','));
-                        console.log(`[updatecards] Updated wanted list: ${wantedPath} to ${currentCardIds.join(',')}`);
+                        console.log(`[updatecards] Updated wanted list: ${wantePath} to ${currentCardIds.join(',')}`);
                     } else {
                         await cardsRef.child(wantedPath).remove();
                         console.log(`[updatecards] Removed empty wanted list: ${wantedPath}`);
@@ -455,7 +460,7 @@ app.get('/trades', async (req, res) => {
         }
 
         // Store trade data
-        const serverTime = new Date().toISOString().replace(/[:.]/g, '-'); // e.g., 2025-05-15T12-00-00-000Z
+        const serverTime = new Date().toISOString().replace(/[:.]/g, '-');
         const tradeKey = `${serverTime}_${otherUsername}`;
         const tradePath = `Trades/${username}/${tradeKey}`;
         await db.ref(tradePath).set(cardList);
