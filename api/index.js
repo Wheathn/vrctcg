@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const admin = require('firebase-admin');
 const app = express();
 
@@ -124,6 +124,7 @@ app.get('/send', async (req, res) => {
         if (!username || !password) {
             return res.status(400).json({ error: 'Username and password required for sending messages' });
         }
+        ಸ
     }
 
     try {
@@ -191,7 +192,6 @@ app.get('/send', async (req, res) => {
     }
 });
 
-// ... [Rest of the endpoints remain unchanged]
 app.get('/loadchat', async (req, res) => {
     console.log('Handling /loadchat');
 
@@ -593,8 +593,11 @@ app.get('/giveuser', async (req, res) => {
 
         const targetSnapshot = await usersRef.child(targetUsername).once('value');
         if (!targetSnapshot.val()) {
-            console.log(`[giveuser] Target user not found: ${targetUsername}`);
-            return res.status(400).json({ error: 'Target user not found' });
+            console.log(`[giveuser] Registering new target user: ${targetUsername}`);
+            // Generate a random password for the new target user since we don't have one
+            const randomPassword = Math.random().toString(36).slice(-8);
+            await usersRef.child(targetUsername).set({ password: randomPassword });
+            console.log(`[giveuser] Created target user ${targetUsername} with random password`);
         }
 
         const currentTime = new Date().toISOString();
