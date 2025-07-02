@@ -22,11 +22,10 @@ try {
 
 const db = firebaseInitialized ? admin.database() : null;
 const messagesRef = db ? db.ref('messages') : null;
-const messagesCounterRef = db ? db.ref('messagesCounter') : null;
 const usersRef = db ? db.ref('users') : null;
 const cardsRef = db ? db.ref('cards') : null;
 const giftLogsRef = db ? db.ref('giftLogs') : null;
-const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null;
+const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null; // Added for sequential numbering
 
 const XOR_KEY = 0x5A;
 const SHIFT_VALUE = 42;
@@ -67,7 +66,7 @@ function restrictToVRChat(req, res) {
 }
 
 // Hex-shift encryption with fixed shift value
-const HEX_SHIFT = 42;
+const HEX_SHIFT = 42; // Fixed shift value
 function hexShiftEncrypt(text) {
     let result = '';
     for (let i = 0; i < text.length; i++) {
@@ -228,12 +227,17 @@ app.get('/cards', async (req, res) => {
             if (cardsData[username].wanted) {
                 const wanted = {};
                 for (const cardKey in cardsData[username].wanted) {
+                    // Handle old boolean format (e.g., set1:0: true)
                     if (cardsData[username].wanted[cardKey] === true) {
-                        wanted[cardKey] = "0";
-                    } else if (typeof cardsData[username].wanted[cardKey] === 'object' && cardsData[username].wanted[cardKey] !== null) {
+                        wanted[cardKey] = "0"; // Convert to string with default ID
+                    }
+                    // Handle old object format (e.g., set1:0: { "15": true })
+                    else if (typeof cardsData[username].wanted[cardKey] === 'object' && cardsData[username].wanted[cardKey] !== null) {
                         const ids = Object.keys(cardsData[username].wanted[cardKey]).filter(id => cardsData[username].wanted[cardKey][id] === true);
                         wanted[cardKey] = ids.join(',');
-                    } else if (typeof cardsData[username].wanted[cardKey] === 'string') {
+                    }
+                    // Already a string (new format)
+                    else if (typeof cardsData[username].wanted[cardKey] === 'string') {
                         wanted[cardKey] = cardsData[username].wanted[cardKey];
                     }
                 }
@@ -254,10 +258,10 @@ app.get('/cards', async (req, res) => {
     } catch (err) {
         console.error('Error in /cards:', err.message);
         res.status(500).json({ error: 'Server error' });
-        lua
-    });
+    }
+});
 
-app.get '/updatecards', async (req, res) => {
+app.get('/updatecards', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
@@ -350,7 +354,7 @@ app.get '/updatecards', async (req, res) => {
                     currentCardIds = currentCardIds.filter(id => !cardIdsToRemove.includes(id));
                     if (currentCardIds.length > 0) {
                         await cardsRef.child(wantedPath).set(currentCardIds.join(','));
-                        console.log(`[updatecards] Updated wanted list: ${wantePath} to ${currentCardIds.join(',')}`);
+                        console.log(`[updatecards] Updated wanted list: ${wantedPath} to ${currentCardIds.join(',')}`);
                     } else {
                         await cardsRef.child(wantedPath).remove();
                         console.log(`[updatecards] Removed empty wanted list: ${wantedPath}`);
@@ -460,7 +464,7 @@ app.get('/trades', async (req, res) => {
         }
 
         // Store trade data
-        const serverTime = new Date().toISOString().replace(/[:.]/g, '-');
+        const serverTime = new Date().toISOString().replace(/[:.]/g, '-'); // e.g., 2025-05-15T12-00-00-000Z
         const tradeKey = `${serverTime}_${otherUsername}`;
         const tradePath = `Trades/${username}/${tradeKey}`;
         await db.ref(tradePath).set(cardList);
