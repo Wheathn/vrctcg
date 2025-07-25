@@ -445,7 +445,7 @@ app.get('/trades', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
-    if (!firebaseInitialized || !usersRef || !db) {
+    if (!firebaseInitialized || !usersRef || !tradesRef || !tradesCounterRef) {
         console.error('Firebase not available for /trades');
         return res.status(500).json({ error: 'Database unavailable' });
     }
@@ -454,20 +454,22 @@ app.get('/trades', async (req, res) => {
     const obfuscatedPassword = req.query.p || '';
     const otherUsername = req.query.other || '';
     const cards = req.query.cards || '';
+    const otherCards = req.query.othercards || '';
 
     const encodedUsername = deobfuscate(obfuscatedUsername);
     const encodedPassword = deobfuscate(obfuscatedPassword);
     const username = hexDecode(encodedUsername);
     const password = hexDecode(encodedPassword);
 
-    console.log(`[trades] Received: username=${username}, otherUsername=${otherUsername}, cards=${cards}`);
+    console.log(`[trades] Received: username=${username}, otherUsername=${otherUsername}, cards=${cards}, otherCards=${otherCards}`);
 
-    if (!username || !password || !otherUsername || !cards) {
-        console.log(`[trades] Missing required parameters: username=${username}, otherUsername=${otherUsername}, cards=${cards}`);
-        return res.status(400).json({ error: 'Username, password, other username, and cards required' });
+    if (!username || !password || !otherUsername || !cards || !otherCards) {
+        console.log(`[trades] Missing required parameters: username=${username}, otherUsername=${otherUsername}, cards=${cards}, otherCards=${otherCards}`);
+        return res.status(400).json({ error: 'Username, password, other username, cards, and other cards required' });
     }
 
     try {
+        // Validate user credentials
         const userSnapshot = await usersRef.child(username).once('value');
         const userData = userSnapshot.val();
         if (!userData) {
@@ -481,17 +483,43 @@ app.get('/trades', async (req, res) => {
             return res.status(403).json({ error: 'Invalid password' });
         }
 
+        // Validate card lists
         const cardList = cards.split(',').filter(card => card.includes(':'));
-        if (cardList.length === 0) {
-            console.log(`[trades] No valid cards provided: ${cards}`);
-            return res.status(400).json({ error: 'No valid cards provided' });
+        const otherCardList = otherCards.split(',').filter(card => card.includes(':'));
+        if (cardList.length === 0 || otherCardList.length === 0) {
+            console.log(`[trades] Invalid card lists: cards=${cards}, otherCards=${otherCards}`);
+            return res.status(400).json({ cantrade: false, error: 'Invalid or empty card lists' });
         }
 
-        const serverTime = new Date().toISOString().replace(/[:.]/g, '-');
-        const tradeKey = `${serverTime}_${otherUsername}`;
-        const tradePath = `Trades/${username}/${tradeKey}`;
-        await db.ref(tradePath).set(cardList);
-        console.log(`[trades] Stored trade: ${tradePath} with cards: ${cardList.join(', ')}`);
+        // Initialize tradesCounter if it doesn't exist
+        const counterSnapshot = await tradesCounterRef.once('value');
+        if (!counterSnapshot.exists()) {
+            await tradesCounterRef.set(-1);
+            console.log('Initialized tradesCounter to -1');
+        }
+
+        // Atomically increment trade counter
+        let tradeNumber;
+        const transactionResult = await tradesCounterRef.transaction(current => {
+            return (current || -1) + 1;
+        });
+
+        if (!transactionResult.committed) {
+            throw new Error('Transaction failed to commit');
+        }
+        tradeNumber = transactionResult.snapshot.val();
+        console.log(`[trades] Assigned trade number: ${tradeNumber}`);
+
+        // Store trade with sequential number
+        const timestamp = new Date().toISOString();
+        await tradesRef.child(tradeNumber.toString()).set({
+            user: username,
+            cards: cardList,
+            otherUser: otherUsername,
+            otherCards: otherCardList,
+            timestamp: timestamp
+        });
+        console.log(`[trades] Stored trade at Trades/${tradeNumber}: user=${username}, cards=${cardList.join(',')}, otherUser=${otherUsername}, otherCards=${otherCardList.join(',')}`);
 
         res.json({ cantrade: true });
     } catch (err) {
