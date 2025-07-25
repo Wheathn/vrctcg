@@ -30,6 +30,8 @@ const messagesCounterRef = db ? db.ref('messagesCounter') : null;
 const usersRef = db ? db.ref('users') : null;
 const cardsRef = db ? db.ref('cards') : null;
 const giftLogsRef = db ? db.ref('giftLogs') : null;
+const tradesRef = db ? db.ref('Trades') : null;
+const tradesCounterRef = db ? db.ref('tradesCounter') : null;
 const giftLogsCounterRef = db ? db.ref('giftLogsCounter') : null;
 
 const XOR_KEY = 0x5A;
@@ -445,9 +447,15 @@ app.get('/trades', async (req, res) => {
     const restriction = restrictToVRChat(req, res);
     if (restriction) return restriction;
 
-    if (!firebaseInitialized || !usersRef || !tradesRef || !tradesCounterRef) {
-        console.error('Firebase not available for /trades');
-        return res.status(500).json({ error: 'Database unavailable' });
+    if (!firebaseInitialized || !db || !usersRef || !tradesRef || !tradesCounterRef) {
+        console.error('Firebase not available for /trades', {
+            firebaseInitialized,
+            db: !!db,
+            usersRef: !!usersRef,
+            tradesRef: !!tradesRef,
+            tradesCounterRef: !!tradesCounterRef
+        });
+        return res.status(500).json({ cantrade: false, error: 'Database unavailable' });
     }
 
     const obfuscatedUsername = req.query.n || '';
@@ -465,7 +473,7 @@ app.get('/trades', async (req, res) => {
 
     if (!username || !password || !otherUsername || !cards || !otherCards) {
         console.log(`[trades] Missing required parameters: username=${username}, otherUsername=${otherUsername}, cards=${cards}, otherCards=${otherCards}`);
-        return res.status(400).json({ error: 'Username, password, other username, cards, and other cards required' });
+        return res.status(400).json({ cantrade: false, error: 'Username, password, other username, cards, and other cards required' });
     }
 
     try {
@@ -480,7 +488,7 @@ app.get('/trades', async (req, res) => {
             await usersRef.child(username).update({ password });
         } else if (userData.password !== password) {
             console.log(`[trades] Password mismatch for ${username}`);
-            return res.status(403).json({ error: 'Invalid password' });
+            return res.status(403).json({ cantrade: false, error: 'Invalid password' });
         }
 
         // Validate card lists
@@ -524,7 +532,7 @@ app.get('/trades', async (req, res) => {
         res.json({ cantrade: true });
     } catch (err) {
         console.error(`[trades] Error processing trade: ${err.message}`);
-        res.status(500).json({ cantrade: false, error: 'Server error' });
+        res.status(500).json({ cantrade: false, error: `Server error: ${err.message}` });
     }
 });
 
